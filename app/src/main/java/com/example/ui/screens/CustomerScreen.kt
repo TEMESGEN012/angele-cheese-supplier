@@ -63,10 +63,10 @@ fun CustomerScreen(viewModel: DairyViewModel) {
 
     var activeTab by remember { mutableStateOf(0) } // 0: Browse, 1: Track Orders
 
-    // Auto-sync products when customer opens the Browse tab, if API mode is enabled
+    // Auto-sync products when customer opens the Browse tab
     LaunchedEffect(activeTab) {
-        if (activeTab == 0 && apiEnabled) {
-            viewModel.syncPullProducts()
+        if (activeTab == 0) {
+            viewModel.syncPullProducts(silent = true)
         }
     }
     var selectedCategory by remember { mutableStateOf("All") }
@@ -147,11 +147,7 @@ fun CustomerScreen(viewModel: DairyViewModel) {
                                 // Manual Refresh/Sync Button
                                 IconButton(
                                     onClick = {
-                                        if (apiEnabled) {
-                                            viewModel.syncPullProducts()
-                                        } else {
-                                            viewModel.setInfoMessage("Local Offline Mode: Catalog is automatically up-to-date with any changes you make in the Admin panel!")
-                                        }
+                                        viewModel.syncPullProducts()
                                     },
                                     modifier = Modifier.testTag("customer_refresh_catalog_button")
                                 ) {
