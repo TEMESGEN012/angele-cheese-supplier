@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1041070501221",
+    "project_id": "angel-cheese-supplier",
+    "storage_bucket": "angel-cheese-supplier.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1041070501221:android:a23ac2b3127b3bab42058c",
+        "android_client_info": {
+          "package_name": "com.aistudio.dairyflow.hmdrtq"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDvsNNN-X1JI1qiGts7Fby1WWOzuBNvIPo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

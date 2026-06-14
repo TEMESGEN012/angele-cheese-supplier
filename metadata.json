@@ -1,0 +1,8 @@
+{
+  "name": "Remix: angel-cheese-supplier",
+  "description": "Premium dairy and staple food inventory and shopping application with Ethiopian Amharic localization and admin pricing controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
