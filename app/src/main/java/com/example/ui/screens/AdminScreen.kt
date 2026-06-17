@@ -37,9 +37,41 @@ import com.example.ui.theme.ButterGoldSecondary
 import java.text.SimpleDateFormat
 import java.util.*
 
+import android.content.Intent
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.example.AdminNotificationService
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminScreen(viewModel: DairyViewModel) {
+    val context = LocalContext.current
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val launcher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted: Boolean ->
+            if (isGranted) {
+                val serviceIntent = Intent(context, AdminNotificationService::class.java)
+                context.startForegroundService(serviceIntent)
+            }
+        }
+        LaunchedEffect(Unit) {
+            launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    } else {
+        LaunchedEffect(Unit) {
+            val serviceIntent = Intent(context, AdminNotificationService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        }
+    }
+
     val currentUser by viewModel.currentUser.collectAsState()
     val products by viewModel.productsList.collectAsState()
     val orders by viewModel.adminOrdersList.collectAsState()
@@ -192,7 +224,11 @@ fun AdminScreen(viewModel: DairyViewModel) {
                                 )
                             }
                             IconButton(
-                                onClick = { viewModel.logout() },
+                                onClick = { 
+                                    val serviceIntent = Intent(context, AdminNotificationService::class.java)
+                                    context.stopService(serviceIntent)
+                                    viewModel.logout() 
+                                },
                                 modifier = Modifier.testTag("logout_button")
                             ) {
                                 Icon(
