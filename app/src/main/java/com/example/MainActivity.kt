@@ -20,6 +20,9 @@ import com.example.ui.screens.CustomerScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.DairyViewModel
+import android.content.Intent
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
 
 class MainActivity : ComponentActivity() {
     
@@ -31,6 +34,22 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Setup notification permission (Android 13+) and start Admin notifier background service
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val launcher = registerForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { /* Permission allowed handled dynamically */ }
+            launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        
+        // Start foreground listener service so it remains active in the background continuously
+        val serviceIntent = Intent(this, AdminNotificationService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
         
         setContent {
             MyApplicationTheme {

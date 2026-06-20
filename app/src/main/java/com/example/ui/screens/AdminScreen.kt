@@ -49,26 +49,23 @@ import com.example.AdminNotificationService
 fun AdminScreen(viewModel: DairyViewModel) {
     val context = LocalContext.current
 
+    // Always start the foreground listener service so it remains active in background immediately upon opening AdminScreen
+    LaunchedEffect(Unit) {
+        val serviceIntent = Intent(context, AdminNotificationService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(serviceIntent)
+        } else {
+            context.startService(serviceIntent)
+        }
+    }
+
+    // Request POST_NOTIFICATIONS permission in Android 13+ (Tiramisu)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val launcher = rememberLauncherForActivityResult(
             ActivityResultContracts.RequestPermission()
-        ) { isGranted: Boolean ->
-            if (isGranted) {
-                val serviceIntent = Intent(context, AdminNotificationService::class.java)
-                context.startForegroundService(serviceIntent)
-            }
-        }
+        ) { /* Preference is checked, notification permission handles visibility */ }
         LaunchedEffect(Unit) {
             launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-        }
-    } else {
-        LaunchedEffect(Unit) {
-            val serviceIntent = Intent(context, AdminNotificationService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
-            }
         }
     }
 
@@ -225,8 +222,6 @@ fun AdminScreen(viewModel: DairyViewModel) {
                             }
                             IconButton(
                                 onClick = { 
-                                    val serviceIntent = Intent(context, AdminNotificationService::class.java)
-                                    context.stopService(serviceIntent)
                                     viewModel.logout() 
                                 },
                                 modifier = Modifier.testTag("logout_button")
