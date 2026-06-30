@@ -49,6 +49,7 @@ class AdminNotificationService : Service() {
 
     private val serviceStartTime = System.currentTimeMillis()
     private var isListening = false
+    private var isInitialOrdersLoaded = false
 
     private fun listenForRealtimeSync() {
         if (isListening) return
@@ -58,6 +59,15 @@ class AdminNotificationService : Service() {
 
         // 1. Core Background Order Sync & Notification triggers
         val ordersRef = database.getReference("orders")
+
+        ordersRef.addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                isInitialOrdersLoaded = true
+                Log.d("AdminService", "Initial orders loading complete.")
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        })
+
         ordersRef.addChildEventListener(object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 syncAndNotifyOrder(snapshot, isNewAdded = true)
@@ -147,8 +157,8 @@ class AdminNotificationService : Service() {
             val customer = snapshot.child("customerUsername").getValue(String::class.java) ?: ""
             val productId = snapshot.child("productId").getValue(String::class.java) ?: ""
             val productName = snapshot.child("productName").getValue(String::class.java) ?: ""
-            val qty = snapshot.child("quantityKg").getValue(Double::class.java) ?: 0.0
-            val totalPrice = snapshot.child("totalPrice").getValue(Double::class.java) ?: 0.0
+            val qty = (snapshot.child("quantityKg").value as? Number)?.toDouble() ?: 0.0
+            val totalPrice = (snapshot.child("totalPrice").value as? Number)?.toDouble() ?: 0.0
             val status = snapshot.child("status").getValue(String::class.java) ?: "Pending"
             val address = snapshot.child("deliveryAddress").getValue(String::class.java) ?: "Standard Pickup Store"
             val amharicName = snapshot.child("amharicName").getValue(String::class.java) ?: ""
@@ -177,8 +187,8 @@ class AdminNotificationService : Service() {
                 }
             }
 
-            // Only trigger a status-bar push notification if it is a NEW pending order created after service startup
-            if (isNewAdded && status == "Pending" && timestamp > serviceStartTime) {
+            // Only trigger a status-bar push notification if it is a NEW pending order
+            if (isNewAdded && status == "Pending" && (isInitialOrdersLoaded || timestamp > serviceStartTime)) {
                 showOrderNotification(customer, productName, qty)
             }
         } catch (e: Exception) {
@@ -193,8 +203,8 @@ class AdminNotificationService : Service() {
             val name = snapshot.child("name").getValue(String::class.java) ?: ""
             val amharicName = snapshot.child("amharicName").getValue(String::class.java) ?: ""
             val category = snapshot.child("category").getValue(String::class.java) ?: "Uncategorized"
-            val pricePerKg = snapshot.child("pricePerKg").getValue(Double::class.java) ?: 0.0
-            val stockKg = snapshot.child("stockKg").getValue(Double::class.java) ?: 0.0
+            val pricePerKg = (snapshot.child("pricePerKg").value as? Number)?.toDouble() ?: 0.0
+            val stockKg = (snapshot.child("stockKg").value as? Number)?.toDouble() ?: 0.0
             val unitName = snapshot.child("unitName").getValue(String::class.java) ?: "kg"
             val description = snapshot.child("description").getValue(String::class.java) ?: ""
             val imageUrl = snapshot.child("imageUrl").getValue(String::class.java) ?: ""

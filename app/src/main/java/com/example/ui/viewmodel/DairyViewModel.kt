@@ -709,8 +709,8 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                             val id = child.child("id").getValue(String::class.java) ?: ""
                             val name = child.child("name").getValue(String::class.java) ?: ""
                             val amharicName = child.child("amharicName").getValue(String::class.java) ?: ""
-                            val pricePerKg = child.child("pricePerKg").getValue(Double::class.java) ?: 0.0
-                            val stockKg = child.child("stockKg").getValue(Double::class.java) ?: 0.0
+                            val pricePerKg = (child.child("pricePerKg").value as? Number)?.toDouble() ?: 0.0
+                            val stockKg = (child.child("stockKg").value as? Number)?.toDouble() ?: 0.0
                             val imageUrl = child.child("imageUrl").getValue(String::class.java) ?: ""
                             
                             val category = child.child("category").getValue(String::class.java) ?: "Uncategorized"
@@ -796,8 +796,8 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                             val customerUsername = child.child("customerUsername").getValue(String::class.java) ?: ""
                             val productId = child.child("productId").getValue(String::class.java) ?: ""
                             val productName = child.child("productName").getValue(String::class.java) ?: ""
-                            val qty = child.child("quantityKg").getValue(Double::class.java) ?: 0.0
-                            val price = child.child("totalPrice").getValue(Double::class.java) ?: 0.0
+                            val qty = (child.child("quantityKg").value as? Number)?.toDouble() ?: 0.0
+                            val price = (child.child("totalPrice").value as? Number)?.toDouble() ?: 0.0
                             val status = child.child("status").getValue(String::class.java) ?: "Pending"
                             val address = child.child("deliveryAddress").getValue(String::class.java) ?: ""
                             val amharicName = child.child("amharicName").getValue(String::class.java) ?: ""
