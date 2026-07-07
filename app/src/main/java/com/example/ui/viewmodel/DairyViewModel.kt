@@ -61,6 +61,16 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentScreen = MutableStateFlow<AppScreen>(AppScreen.CustomerHome)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
+    // App Config & Version control states
+    private val _isUpdateRequired = MutableStateFlow(false)
+    val isUpdateRequired: StateFlow<Boolean> = _isUpdateRequired.asStateFlow()
+
+    private val _minVersionCode = MutableStateFlow(1)
+    val minVersionCode: StateFlow<Int> = _minVersionCode.asStateFlow()
+
+    private val _updateUrl = MutableStateFlow("https://gitlab.com")
+    val updateUrl: StateFlow<String> = _updateUrl.asStateFlow()
+
     // Real-time Firebase Database connection handling
     init {
         // Trigger pre-population async
@@ -73,6 +83,22 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val database = com.google.firebase.database.FirebaseDatabase.getInstance()
                 
+                // Track App Version Config for Force Update
+                val configRef = database.getReference("app_config")
+                configRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+                    override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                        val minVersion = snapshot.child("minimum_version_code").getValue(Int::class.java) ?: 1
+                        val url = snapshot.child("update_url").getValue(String::class.java) ?: "https://gitlab.com"
+                        
+                        _minVersionCode.value = minVersion
+                        _updateUrl.value = url
+                        
+                        val currentVersion = com.example.BuildConfig.VERSION_CODE
+                        _isUpdateRequired.value = currentVersion < minVersion
+                    }
+                    override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+                })
+
                 // Track products
                 val productsRef = database.getReference("products")
                 productsRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
@@ -652,6 +678,34 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (e: Exception) {}
             }.onFailure { th ->
                 _errorMessage.value = th.message ?: "Failed quick stock adjustment."
+            }
+        }
+    }
+
+    /**
+     * Admin updates the minimum required version code and update URL in Firebase
+     */
+    fun adminUpdateMinVersion(versionCode: Int, updateUrl: String) {
+        val user = _currentUser.value
+        if (user == null || user.role != "admin") {
+            _errorMessage.value = "Unauthorized operation."
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val configRef = database.getReference("app_config")
+                val updates = mapOf(
+                    "minimum_version_code" to versionCode,
+                    "update_url" to updateUrl
+                )
+                configRef.setValue(updates).addOnSuccessListener {
+                    _statusMessage.value = "Minimum required version updated to Code: $versionCode successfully!"
+                }.addOnFailureListener {
+                    _errorMessage.value = "Failed to update config: ${it.localizedMessage}"
+                }
+            } catch (e: Exception) {
+                _errorMessage.value = "Database connection error: ${e.localizedMessage}"
             }
         }
     }

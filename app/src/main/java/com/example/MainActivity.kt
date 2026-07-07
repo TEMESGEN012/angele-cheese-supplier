@@ -17,6 +17,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.screens.AdminScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.CustomerScreen
+import com.example.ui.screens.ForceUpdateScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.DairyViewModel
@@ -53,24 +54,29 @@ class MainActivity : ComponentActivity() {
         
         setContent {
             MyApplicationTheme {
-                val screenState by dairyViewModel.currentScreen.collectAsStateWithLifecycle()
+                val isUpdateRequired by dairyViewModel.isUpdateRequired.collectAsStateWithLifecycle()
                 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    when (screenState) {
-                        is AppScreen.Login -> {
-                            AuthScreen(viewModel = dairyViewModel)
-                        }
-                        is AppScreen.Register -> {
-                            AuthScreen(viewModel = dairyViewModel)
-                        }
-                        is AppScreen.CustomerHome -> {
-                            CustomerScreen(viewModel = dairyViewModel)
-                        }
-                        is AppScreen.AdminHome -> {
-                            AdminScreen(viewModel = dairyViewModel)
+                    if (isUpdateRequired) {
+                        ForceUpdateScreen(viewModel = dairyViewModel)
+                    } else {
+                        val screenState by dairyViewModel.currentScreen.collectAsStateWithLifecycle()
+                        when (screenState) {
+                            is AppScreen.Login -> {
+                                AuthScreen(viewModel = dairyViewModel)
+                            }
+                            is AppScreen.Register -> {
+                                AuthScreen(viewModel = dairyViewModel)
+                            }
+                            is AppScreen.CustomerHome -> {
+                                CustomerScreen(viewModel = dairyViewModel)
+                            }
+                            is AppScreen.AdminHome -> {
+                                AdminScreen(viewModel = dairyViewModel)
+                            }
                         }
                     }
                 }

@@ -133,6 +133,9 @@ fun AdminScreen(viewModel: DairyViewModel) {
     var adminConfirmPasswordInput by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
 
+    // App Update Configuration state
+    var showAppUpdateConfigDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             Surface(
@@ -204,6 +207,18 @@ fun AdminScreen(viewModel: DairyViewModel) {
                                         )
                                     }
                                 }
+                            }
+                            IconButton(
+                                onClick = {
+                                    showAppUpdateConfigDialog = true
+                                },
+                                modifier = Modifier.testTag("admin_app_updates_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SystemUpdate,
+                                    contentDescription = "App Force Update Settings",
+                                    tint = Color.White
+                                )
                             }
                             IconButton(
                                 onClick = {
@@ -1397,6 +1412,101 @@ fun AdminScreen(viewModel: DairyViewModel) {
                     },
                     dismissButton = {
                         TextButton(onClick = { showProfileDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
+            }
+
+            if (showAppUpdateConfigDialog) {
+                val minVersionCode by viewModel.minVersionCode.collectAsState()
+                val updateUrl by viewModel.updateUrl.collectAsState()
+                
+                var minVersionInput by remember { mutableStateOf(minVersionCode.toString()) }
+                var updateUrlInput by remember { mutableStateOf(updateUrl) }
+
+                AlertDialog(
+                    onDismissRequest = { showAppUpdateConfigDialog = false },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.SystemUpdate,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "App Update & Version Control",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "Enforce a minimum required version. Users on versions older than this will be blocked from using the app.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+
+                            OutlinedTextField(
+                                value = minVersionInput,
+                                onValueChange = { minVersionInput = it },
+                                label = { Text("Minimum Version Code (Number)") },
+                                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("admin_min_version_field")
+                            )
+
+                            OutlinedTextField(
+                                value = updateUrlInput,
+                                onValueChange = { updateUrlInput = it },
+                                label = { Text("APK Download / Update URL") },
+                                leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("admin_update_url_field")
+                            )
+                            
+                            Text(
+                                text = "Current APK build is Version Code: ${com.example.BuildConfig.VERSION_CODE} (${com.example.BuildConfig.VERSION_NAME})",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val code = minVersionInput.toIntOrNull()
+                                if (code == null || code < 1) {
+                                    viewModel.setErrorMessage("Version Code must be a positive integer.")
+                                    return@Button
+                                }
+                                if (updateUrlInput.isBlank()) {
+                                    viewModel.setErrorMessage("Update URL cannot be empty.")
+                                    return@Button
+                                }
+                                viewModel.adminUpdateMinVersion(code, updateUrlInput)
+                                showAppUpdateConfigDialog = false
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("admin_save_updates_button")
+                        ) {
+                            Text("Enforce Rules")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAppUpdateConfigDialog = false }) {
                             Text("Cancel")
                         }
                     }
