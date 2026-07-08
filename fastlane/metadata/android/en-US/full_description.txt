@@ -1,0 +1,1 @@
+A premium dairy and staple food inventory and shopping application featuring Amharic localization and administrator pricing controls, built natively for Android.
