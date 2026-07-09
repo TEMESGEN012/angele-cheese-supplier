@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "1041070501221",
+    "firebase_url": "https://angel-cheese-supplier-default-rtdb.firebaseio.com",
     "project_id": "angel-cheese-supplier",
     "storage_bucket": "angel-cheese-supplier.firebasestorage.app"
   },
