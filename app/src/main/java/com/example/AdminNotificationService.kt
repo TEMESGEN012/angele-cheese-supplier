@@ -55,7 +55,7 @@ class AdminNotificationService : Service() {
         if (isListening) return
         isListening = true
 
-        val database = FirebaseDatabase.getInstance()
+        val database = FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
 
         // 1. Core Background Order Sync & Notification triggers
         val ordersRef = database.getReference("orders")

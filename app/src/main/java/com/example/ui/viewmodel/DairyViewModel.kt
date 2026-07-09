@@ -81,7 +81,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         // Firebase Realtime DB Listeners
         viewModelScope.launch {
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                 
                 // Track App Version Config for Force Update
                 val configRef = database.getReference("app_config")
@@ -366,7 +366,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                     
                     // Firebase Tracking Node Update
                     try {
-                        val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                        val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                         database.getReference("orders_trigger").setValue(System.currentTimeMillis().toString())
                         
                         // Push full order object directly to Firebase
@@ -479,7 +479,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             repository.updateProduct(productId, price, stock, user.fullName).onSuccess { updatedProduct ->
                 _statusMessage.value = "Updated visual pricing & catalogs."
                 try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                     database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
                     database.getReference("products").child(productId).setValue(updatedProduct)
                 } catch (e: Exception) {}
@@ -497,7 +497,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             repository.updateOrderStatus(orderId, updatedStatus)
             _statusMessage.value = "Order status updated to $updatedStatus."
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                 database.getReference("orders_trigger").setValue(System.currentTimeMillis().toString())
                 database.getReference("orders").child(orderId.toString()).child("status").setValue(updatedStatus)
             } catch (e: Exception) {}
@@ -558,7 +558,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             repository.addProduct(product, user.fullName).onSuccess {
                 _statusMessage.value = "Added product: ${product.name} to catalog."
                 try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                     database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
                     database.getReference("products").child(product.id).setValue(product)
                 } catch (e: Exception) {}
@@ -590,7 +590,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             repository.editProduct(product, user.fullName).onSuccess {
                 _statusMessage.value = "Successfully edited product ${product.name}."
                 try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                     database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
                     database.getReference("products").child(product.id).setValue(product)
                 } catch (e: Exception) {}
@@ -614,7 +614,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             repository.deleteProduct(productId, user.fullName).onSuccess {
                 _statusMessage.value = "Product successfully deleted from catalog."
                 try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                     database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
                     database.getReference("products").child(productId).removeValue()
                 } catch (e: Exception) {}
@@ -637,7 +637,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             repository.deleteOrder(orderId)
             _statusMessage.value = "Order #ORD-$orderId successfully deleted from records."
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                 database.getReference("orders_trigger").setValue(System.currentTimeMillis().toString())
                 database.getReference("orders").child(orderId.toString()).removeValue()
             } catch (e: Exception) {}
@@ -672,7 +672,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             repository.quickAdjustProductStock(productId, delta, user.fullName).onSuccess { updatedProduct ->
                 _statusMessage.value = "Adjusted stock by ${if (delta >= 0.0) "+" else ""}$delta units."
                 try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                     database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
                     database.getReference("products").child(productId).setValue(updatedProduct)
                 } catch (e: Exception) {}
@@ -693,7 +693,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                 val configRef = database.getReference("app_config")
                 val updates = mapOf(
                     "minimum_version_code" to versionCode,
@@ -754,7 +754,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         if (!silent) _errorMessage.value = null
         viewModelScope.launch {
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                 val productsRef = database.getReference("products")
                 productsRef.get().addOnSuccessListener { snapshot ->
                     val remoteList = mutableListOf<Product>()
@@ -815,7 +815,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         val list = productsList.value
         viewModelScope.launch {
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                 var count = 0
                 val productsRef = database.getReference("products")
                 list.forEach { prod ->
@@ -840,7 +840,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         if (!silent) _errorMessage.value = null
         viewModelScope.launch {
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                 val ordersRef = database.getReference("orders")
                 ordersRef.get().addOnSuccessListener { snapshot ->
                     val remoteOrders = mutableListOf<Order>()
@@ -895,7 +895,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     fun syncPullNotifications(silent: Boolean = false) {
         viewModelScope.launch {
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance()
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
                 val notificationsRef = database.getReference("notifications")
                 notificationsRef.get().addOnSuccessListener { snapshot ->
                     val remoteNotifs = mutableListOf<Notification>()
