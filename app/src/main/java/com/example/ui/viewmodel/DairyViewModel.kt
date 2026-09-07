@@ -2,11 +2,15 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.api.RealtimeConnectionStatus
 import com.example.data.api.RetrofitClient
+import com.example.data.api.SupabaseHelper
+import com.example.data.api.SupabaseRealtimeManager
 import com.example.data.local.AppDatabase
 import com.example.data.model.Order
 import com.example.data.model.Product
@@ -14,6 +18,7 @@ import com.example.data.model.StockLog
 import com.example.data.model.User
 import com.example.data.model.Notification
 import com.example.data.repository.DairyRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +37,17 @@ sealed interface AppScreen {
     object CustomerHome : AppScreen
     object AdminHome : AppScreen
 }
+
+data class AdminOrderPopup(
+    val orderId: Long,
+    val customerUsername: String,
+    val productName: String,
+    val amharicName: String = "",
+    val quantityKg: Double,
+    val totalPrice: Double,
+    val deliveryAddress: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
 
 class DairyViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
@@ -54,6 +70,23 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     )
     val apiBaseUrl: StateFlow<String> = _apiBaseUrl.asStateFlow()
 
+    private val _dbType = MutableStateFlow(prefs.getString("db_type", "supabase") ?: "supabase")
+    val dbType: StateFlow<String> = _dbType.asStateFlow()
+
+    private val _supabaseUrl = MutableStateFlow(
+        prefs.getString("supabase_url", "https://ibwjydljyjbrqbpspbuk.supabase.co") ?: "https://ibwjydljyjbrqbpspbuk.supabase.co"
+    )
+    val supabaseUrl: StateFlow<String> = _supabaseUrl.asStateFlow()
+
+    private val _supabaseKey = MutableStateFlow(
+        prefs.getString("supabase_key", "sb_publishable_zGGs5I2TL6jQtJNSM1n53A_MeYSsLFn") ?: "sb_publishable_zGGs5I2TL6jQtJNSM1n53A_MeYSsLFn"
+    )
+    val supabaseKey: StateFlow<String> = _supabaseKey.asStateFlow()
+
+    // Supabase Realtime WebSocket connection status & last event timestamp
+    val realtimeConnectionStatus: StateFlow<RealtimeConnectionStatus> = SupabaseRealtimeManager.connectionStatus
+    val realtimeLastEventTime: StateFlow<Long?> = SupabaseRealtimeManager.lastEventTime
+
     private val _apiSyncing = MutableStateFlow(false)
     val apiSyncing: StateFlow<Boolean> = _apiSyncing.asStateFlow()
 
@@ -71,62 +104,74 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateUrl = MutableStateFlow("https://gitlab.com")
     val updateUrl: StateFlow<String> = _updateUrl.asStateFlow()
 
-    // Real-time Firebase Database connection handling
+    // Real-time Database connection handling
     init {
+        // Initialize Supabase Realtime WebSocket Connection & Listener
+        SupabaseRealtimeManager.initialize(application)
+        SupabaseRealtimeManager.addOrderListener { order ->
+            if (_currentUser.value?.role == "admin") {
+                triggerAdminOrderPopup(order)
+            }
+        }
+
         // Trigger pre-population async
         viewModelScope.launch {
             repository.prePopulateIfNeeded()
         }
 
-        // Firebase Realtime DB Listeners
-        viewModelScope.launch {
-            try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                
-                // Track App Version Config for Force Update
-                val configRef = database.getReference("app_config")
-                configRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-                    override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-                        val minVersion = snapshot.child("minimum_version_code").getValue(Int::class.java) ?: 1
-                        val url = snapshot.child("update_url").getValue(String::class.java) ?: "https://gitlab.com"
-                        
-                        _minVersionCode.value = minVersion
-                        _updateUrl.value = url
-                        
-                        val currentVersion = com.example.BuildConfig.VERSION_CODE
-                        _isUpdateRequired.value = currentVersion < minVersion
-                    }
-                    override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
-                })
+        // Periodic/Realtime Sync Engine
+        viewModelScope.launch(Dispatchers.IO) {
+            if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                // Supabase initial load
+                val config = SupabaseHelper.fetchAppConfig(getApplication())
+                if (config != null) {
+                    _minVersionCode.value = config.minimum_version_code
+                    _updateUrl.value = config.update_url
+                    val currentVersion = com.example.BuildConfig.VERSION_CODE
+                    _isUpdateRequired.value = currentVersion < config.minimum_version_code
+                }
+                syncPullProducts(silent = true)
+                syncPullOrders(silent = true)
+                syncPullNotifications(silent = true)
 
-                // Track products
-                val productsRef = database.getReference("products")
-                productsRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-                    override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                // Poll Supabase every 8 seconds to guarantee real-time sync even across devices / mobile data
+                while (true) {
+                    kotlinx.coroutines.delay(8000)
+                    if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                        val latestConfig = SupabaseHelper.fetchAppConfig(getApplication())
+                        if (latestConfig != null) {
+                            _minVersionCode.value = latestConfig.minimum_version_code
+                            _updateUrl.value = latestConfig.update_url
+                            val currentVersion = com.example.BuildConfig.VERSION_CODE
+                            _isUpdateRequired.value = currentVersion < latestConfig.minimum_version_code
+                        }
                         syncPullProducts(silent = true)
-                    }
-                    override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
-                })
-
-                // Track orders
-                val ordersRef = database.getReference("orders")
-                ordersRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-                    override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                         syncPullOrders(silent = true)
-                    }
-                    override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
-                })
-
-                // Track notifications trigger
-                val notificationsRef = database.getReference("notifications_trigger")
-                notificationsRef.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-                    override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                         syncPullNotifications(silent = true)
                     }
-                    override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
-                })
-            } catch (e: Exception) {
-                e.printStackTrace()
+                }
+            }
+        }
+
+        // Real-time observer for new incoming customer orders (triggers popup ONLY for admin logged in user)
+        viewModelScope.launch {
+            repository.allOrders.collect { orders ->
+                if (!isOrderTrackingInitialized) {
+                    orders.forEach { knownOrderIds.add(it.id) }
+                    isOrderTrackingInitialized = true
+                } else {
+                    val newlyArrived = orders.filter { it.id !in knownOrderIds }
+                    orders.forEach { knownOrderIds.add(it.id) }
+
+                    // Only show notification pop up if user is currently logged in as admin
+                    if (_currentUser.value?.role == "admin" && newlyArrived.isNotEmpty()) {
+                        val latestPending = newlyArrived.filter { it.status == "Pending" }.maxByOrNull { it.timestamp }
+                            ?: newlyArrived.lastOrNull()
+                        if (latestPending != null) {
+                            triggerAdminOrderPopup(latestPending)
+                        }
+                    }
+                }
             }
         }
     }
@@ -210,6 +255,39 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     private val _cartMap = MutableStateFlow<Map<String, Double>>(emptyMap())
     val cartMap: StateFlow<Map<String, Double>> = _cartMap.asStateFlow()
 
+    // Real-time In-App Pop-up notification for logged-in Admin user
+    private val _adminOrderPopup = MutableStateFlow<AdminOrderPopup?>(null)
+    val adminOrderPopup: StateFlow<AdminOrderPopup?> = _adminOrderPopup.asStateFlow()
+
+    private val knownOrderIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+    private var isOrderTrackingInitialized = false
+
+    fun dismissAdminOrderPopup() {
+        _adminOrderPopup.value = null
+    }
+
+    fun triggerAdminOrderPopup(order: Order) {
+        // STRICT CHECK: Popup notification message is ONLY shown for the admin logged-in user
+        if (_currentUser.value?.role == "admin") {
+            _adminOrderPopup.value = AdminOrderPopup(
+                orderId = order.id,
+                customerUsername = order.customerUsername,
+                productName = order.productName,
+                amharicName = order.amharicName,
+                quantityKg = order.quantityKg,
+                totalPrice = order.totalPrice,
+                deliveryAddress = order.deliveryAddress,
+                timestamp = order.timestamp
+            )
+        }
+    }
+
+    fun acceptOrderFromPopup(orderId: Long) {
+        adminUpdateOrderStatus(orderId, "Confirmed")
+        _statusMessage.value = "Order #ORD-$orderId has been confirmed!"
+        dismissAdminOrderPopup()
+    }
+
     fun clearStatus() {
         _statusMessage.value = null
         _errorMessage.value = null
@@ -238,8 +316,11 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 _cartMap.value = emptyMap() // clear cart
                 _statusMessage.value = "Logged in as ${user.fullName}"
                 if (user.role == "admin") {
+                    // Populate known order IDs so we only alert for newly incoming orders during active admin session
+                    adminOrdersList.value.forEach { knownOrderIds.add(it.id) }
                     _currentScreen.value = AppScreen.AdminHome
                 } else {
+                    _adminOrderPopup.value = null
                     _currentScreen.value = AppScreen.CustomerHome
                 }
             }.onFailure { th ->
@@ -276,8 +357,10 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 _cartMap.value = emptyMap()
                 _statusMessage.value = "Successfully registered your account!"
                 if (user.role == "admin") {
+                    adminOrdersList.value.forEach { knownOrderIds.add(it.id) }
                     _currentScreen.value = AppScreen.AdminHome
                 } else {
+                    _adminOrderPopup.value = null
                     _currentScreen.value = AppScreen.CustomerHome
                 }
             }.onFailure { th ->
@@ -294,6 +377,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         _guestUsername.value = null
         _guestName.value = null
         _cartMap.value = emptyMap()
+        _adminOrderPopup.value = null
         _statusMessage.value = "Successfully signed out."
         _currentScreen.value = AppScreen.CustomerHome
     }
@@ -364,59 +448,59 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 ).onSuccess { orderId ->
                     successes++
                     
-                    // Firebase Tracking Node Update
-                    try {
-                        val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                        database.getReference("orders_trigger").setValue(System.currentTimeMillis().toString())
-                        
-                        // Push full order object directly to Firebase
-                        val productCached = productsList.value.find { it.id == productId }
-                        val remoteOrder = Order(
-                            id = orderId,
-                            customerUsername = targetUsername,
-                            productId = productId,
-                            productName = productCached?.name ?: "Unknown Product",
-                            amharicName = productCached?.amharicName ?: "",
-                            quantityKg = qty,
-                            totalPrice = (productCached?.pricePerKg ?: 0.0) * qty,
-                            status = "Pending",
-                            deliveryAddress = deliveryAddress.ifBlank { "Standard Delivery Address" }
-                        )
-                        database.getReference("orders").child(orderId.toString()).setValue(remoteOrder)
+                    // Database tracking update
+                    if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            try {
+                                val productCached = productsList.value.find { it.id == productId }
+                                val remoteOrder = Order(
+                                    id = orderId,
+                                    customerUsername = targetUsername,
+                                    productId = productId,
+                                    productName = productCached?.name ?: "Unknown Product",
+                                    amharicName = productCached?.amharicName ?: "",
+                                    quantityKg = qty,
+                                    totalPrice = (productCached?.pricePerKg ?: 0.0) * qty,
+                                    status = "Pending",
+                                    deliveryAddress = deliveryAddress.ifBlank { "Standard Delivery Address" }
+                                )
+                                SupabaseHelper.upsertOrder(getApplication(), remoteOrder)
 
-                        // Push Notifications to Firebase
-                        val notifId = System.currentTimeMillis()
-                        val adminNotif = Notification(
-                            id = notifId,
-                            customerUsername = "admin", 
-                            orderId = orderId,
-                            title = "New Order Arrived!",
-                            titleAmharic = "አዲስ ትዕዛዝ ደርሷል!",
-                            message = "Order #ORD-$orderId has been placed by $targetFullName.",
-                            messageAmharic = "ትዕዛዝ #ORD-$orderId በ $targetFullName ተረጋግጧል።",
-                            status = "Pending",
-                            isRead = false,
-                            timestamp = notifId
-                        )
-                        database.getReference("notifications_trigger").setValue(System.currentTimeMillis().toString())
-                        database.getReference("notifications").child("admin").child(notifId.toString()).setValue(adminNotif)
-                        
-                        val customerNotifId = notifId + 1
-                        val custNotif = Notification(
-                            id = customerNotifId,
-                            customerUsername = targetUsername,
-                            orderId = orderId,
-                            title = "Order Placed Successfully",
-                            titleAmharic = "ትዕዛዝዎ በተሳካ ሁኔታ ተላልፏል",
-                            message = "Your order #ORD-$orderId is now pending.",
-                            messageAmharic = "ትዕዛዝዎ #ORD-$orderId በሂደት ላይ ነው።",
-                            status = "Pending",
-                            isRead = false,
-                            timestamp = customerNotifId
-                        )
-                        database.getReference("notifications").child(targetUsername).child(customerNotifId.toString()).setValue(custNotif)
-                    } catch (e: Exception) {}
+                                val notifId = System.currentTimeMillis()
+                                val adminNotif = Notification(
+                                    id = notifId,
+                                    customerUsername = "admin", 
+                                    orderId = orderId,
+                                    title = "New Order Arrived!",
+                                    titleAmharic = "አዲስ ትዕዛዝ ደርሷል!",
+                                    message = "Order #ORD-$orderId has been placed by $targetFullName.",
+                                    messageAmharic = "ትዕዛዝ #ORD-$orderId በ $targetFullName ተረጋግጧል።",
+                                    status = "Pending",
+                                    isRead = false,
+                                    timestamp = notifId
+                                )
+                                SupabaseHelper.upsertNotification(getApplication(), adminNotif)
 
+                                val customerNotifId = notifId + 1
+                                val custNotif = Notification(
+                                    id = customerNotifId,
+                                    customerUsername = targetUsername,
+                                    orderId = orderId,
+                                    title = "Order Placed Successfully",
+                                    titleAmharic = "ትዕዛዝዎ በተሳካ ሁኔታ ተላልፏል",
+                                    message = "Your order #ORD-$orderId is now pending.",
+                                    messageAmharic = "ትዕዛዝዎ #ORD-$orderId በሂደት ላይ ነው።",
+                                    status = "Pending",
+                                    isRead = false,
+                                    timestamp = customerNotifId
+                                )
+                                SupabaseHelper.upsertNotification(getApplication(), custNotif)
+                            } catch (e: Exception) {
+                                Log.e("DairyViewModel", "Supabase order placement tracking failure", e)
+                            }
+                        }
+                    }
+                    
                     if (_apiEnabled.value) {
                         try {
                             val apiSvc = RetrofitClient.getApiService(_apiBaseUrl.value)
@@ -478,11 +562,11 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.updateProduct(productId, price, stock, user.fullName).onSuccess { updatedProduct ->
                 _statusMessage.value = "Updated visual pricing & catalogs."
-                try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                    database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
-                    database.getReference("products").child(productId).setValue(updatedProduct)
-                } catch (e: Exception) {}
+                if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        SupabaseHelper.upsertProduct(getApplication(), updatedProduct)
+                    }
+                }
             }.onFailure { th ->
                 _errorMessage.value = th.message ?: "Failed updating catalog."
             }
@@ -496,11 +580,14 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.updateOrderStatus(orderId, updatedStatus)
             _statusMessage.value = "Order status updated to $updatedStatus."
-            try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                database.getReference("orders_trigger").setValue(System.currentTimeMillis().toString())
-                database.getReference("orders").child(orderId.toString()).child("status").setValue(updatedStatus)
-            } catch (e: Exception) {}
+            if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val order = adminOrdersList.value.find { it.id == orderId }?.copy(status = updatedStatus)
+                    if (order != null) {
+                        SupabaseHelper.upsertOrder(getApplication(), order)
+                    }
+                }
+            }
         }
     }
 
@@ -557,11 +644,11 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.addProduct(product, user.fullName).onSuccess {
                 _statusMessage.value = "Added product: ${product.name} to catalog."
-                try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                    database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
-                    database.getReference("products").child(product.id).setValue(product)
-                } catch (e: Exception) {}
+                if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        SupabaseHelper.upsertProduct(getApplication(), product)
+                    }
+                }
             }.onFailure { th ->
                 _errorMessage.value = th.message ?: "Failed adding product."
             }
@@ -589,11 +676,11 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.editProduct(product, user.fullName).onSuccess {
                 _statusMessage.value = "Successfully edited product ${product.name}."
-                try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                    database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
-                    database.getReference("products").child(product.id).setValue(product)
-                } catch (e: Exception) {}
+                if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        SupabaseHelper.upsertProduct(getApplication(), product)
+                    }
+                }
             }.onFailure { th ->
                 _errorMessage.value = th.message ?: "Failed updating product."
             }
@@ -613,11 +700,11 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.deleteProduct(productId, user.fullName).onSuccess {
                 _statusMessage.value = "Product successfully deleted from catalog."
-                try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                    database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
-                    database.getReference("products").child(productId).removeValue()
-                } catch (e: Exception) {}
+                if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        SupabaseHelper.deleteProduct(getApplication(), productId)
+                    }
+                }
             }.onFailure { th ->
                 _errorMessage.value = th.message ?: "Failed page/product exclusion."
             }
@@ -636,11 +723,11 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.deleteOrder(orderId)
             _statusMessage.value = "Order #ORD-$orderId successfully deleted from records."
-            try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                database.getReference("orders_trigger").setValue(System.currentTimeMillis().toString())
-                database.getReference("orders").child(orderId.toString()).removeValue()
-            } catch (e: Exception) {}
+            if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    SupabaseHelper.deleteOrder(getApplication(), orderId)
+                }
+            }
         }
     }
 
@@ -671,11 +758,11 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.quickAdjustProductStock(productId, delta, user.fullName).onSuccess { updatedProduct ->
                 _statusMessage.value = "Adjusted stock by ${if (delta >= 0.0) "+" else ""}$delta units."
-                try {
-                    val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                    database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
-                    database.getReference("products").child(productId).setValue(updatedProduct)
-                } catch (e: Exception) {}
+                if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        SupabaseHelper.upsertProduct(getApplication(), updatedProduct)
+                    }
+                }
             }.onFailure { th ->
                 _errorMessage.value = th.message ?: "Failed quick stock adjustment."
             }
@@ -692,20 +779,17 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                val configRef = database.getReference("app_config")
-                val updates = mapOf(
-                    "minimum_version_code" to versionCode,
-                    "update_url" to updateUrl
-                )
-                configRef.setValue(updates).addOnSuccessListener {
-                    _statusMessage.value = "Minimum required version updated to Code: $versionCode successfully!"
-                }.addOnFailureListener {
-                    _errorMessage.value = "Failed to update config: ${it.localizedMessage}"
+            if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val success = SupabaseHelper.updateAppConfig(getApplication(), versionCode, updateUrl)
+                    if (success) {
+                        _statusMessage.value = "Minimum required version updated to Code: $versionCode successfully!"
+                    } else {
+                        _errorMessage.value = "Failed to update config on Supabase."
+                    }
                 }
-            } catch (e: Exception) {
-                _errorMessage.value = "Database connection error: ${e.localizedMessage}"
+            } else {
+                _statusMessage.value = "Minimum required version updated to Code: $versionCode successfully!"
             }
         }
     }
@@ -746,147 +830,115 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         _statusMessage.value = "REST API base settings updated successfully!"
     }
 
+    fun updateDatabaseSettings(dbType: String, supabaseUrl: String, supabaseKey: String) {
+        prefs.edit().apply {
+            putString("db_type", dbType)
+            putString("supabase_url", supabaseUrl.trim())
+            putString("supabase_key", supabaseKey.trim())
+            apply()
+        }
+        _dbType.value = dbType
+        _supabaseUrl.value = supabaseUrl.trim()
+        _supabaseKey.value = supabaseKey.trim()
+
+        // Reconnect Supabase Realtime WebSocket with the newly supplied configuration
+        SupabaseRealtimeManager.reconnect()
+        
+        // Immediately pull latest products, orders and notifications from Supabase
+        if (dbType == "supabase") {
+            syncPullProducts(silent = true)
+            syncPullOrders(silent = false)
+            syncPullNotifications(silent = true)
+        }
+        
+        _statusMessage.value = "Database settings saved & Supabase Realtime connected!"
+    }
+
+    fun reconnectRealtime() {
+        SupabaseRealtimeManager.reconnect()
+        _statusMessage.value = "Reconnecting to Supabase Realtime..."
+    }
+
+    fun testSupabaseConnection(url: String, key: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = SupabaseRealtimeManager.testConnection(getApplication(), url.trim(), key.trim())
+            result.onSuccess { msg ->
+                onResult(true, msg)
+            }.onFailure { th ->
+                onResult(false, th.message ?: "Connection test failed.")
+            }
+        }
+    }
+
     /**
-     * Pulls products from the Remote REST API to overwrite local database.
+     * Pulls products from the Remote Supabase database to overwrite local database.
      */
     fun syncPullProducts(silent: Boolean = false) {
         _apiSyncing.value = true
         if (!silent) _errorMessage.value = null
         viewModelScope.launch {
-            try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                val productsRef = database.getReference("products")
-                productsRef.get().addOnSuccessListener { snapshot ->
-                    val remoteList = mutableListOf<Product>()
-                    for (child in snapshot.children) {
-                        try {
-                            val id = child.child("id").getValue(String::class.java) ?: ""
-                            val name = child.child("name").getValue(String::class.java) ?: ""
-                            val amharicName = child.child("amharicName").getValue(String::class.java) ?: ""
-                            val pricePerKg = (child.child("pricePerKg").value as? Number)?.toDouble() ?: 0.0
-                            val stockKg = (child.child("stockKg").value as? Number)?.toDouble() ?: 0.0
-                            val imageUrl = child.child("imageUrl").getValue(String::class.java) ?: ""
-                            
-                            val category = child.child("category").getValue(String::class.java) ?: "Uncategorized"
-                            val description = child.child("description").getValue(String::class.java) ?: ""
-                            val unitName = child.child("unitName").getValue(String::class.java) ?: "kg"
-                            val nutritionalInfo = child.child("nutritionalInfo").getValue(String::class.java) ?: ""
-                            
-                            remoteList.add(Product(
-                                id = id,
-                                name = name,
-                                amharicName = amharicName,
-                                category = category,
-                                pricePerKg = pricePerKg,
-                                stockKg = stockKg,
-                                unitName = unitName,
-                                description = description,
-                                imageUrl = imageUrl,
-                                nutritionalInfo = nutritionalInfo
-                            ))
-                        } catch (e: Exception) {}
-                    }
-                    if (remoteList.isNotEmpty()) {
-                        viewModelScope.launch {
-                            repository.insertProductsFromApi(remoteList)
-                        }
-                        if (!silent) _statusMessage.value = "Pulled ${remoteList.size} products from Firebase successfully!"
+            if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val remoteList = SupabaseHelper.fetchProducts(getApplication())
+                    if (remoteList != null) {
+                        repository.insertProductsFromApi(remoteList)
+                        if (!silent) _statusMessage.value = "Pulled ${remoteList.size} products from Supabase successfully!"
                     } else {
-                        if (!silent) _statusMessage.value = "No products found on Firebase."
+                        if (!silent) _errorMessage.value = "Failed to pull products from Supabase."
                     }
-                    _apiSyncing.value = false
-                }.addOnFailureListener {
-                    if (!silent) _errorMessage.value = "Firebase API Pull Error: ${it.localizedMessage}"
                     _apiSyncing.value = false
                 }
-            } catch (e: Exception) {
-                if (!silent) _errorMessage.value = "Firebase Connection Error: ${e.localizedMessage}"
+            } else {
                 _apiSyncing.value = false
             }
         }
     }
 
     /**
-     * Pushes current local products database up to the Remote REST API.
+     * Pushes current local products database up to Supabase.
      */
     fun syncPushProducts() {
         _apiSyncing.value = true
         _errorMessage.value = null
         val list = productsList.value
         viewModelScope.launch {
-            try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                var count = 0
-                val productsRef = database.getReference("products")
-                list.forEach { prod ->
-                    productsRef.child(prod.id).setValue(prod)
-                    count++
+            if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    var count = 0
+                    list.forEach { prod ->
+                        if (SupabaseHelper.upsertProduct(getApplication(), prod)) {
+                            count++
+                        }
+                    }
+                    _statusMessage.value = "Pushed $count products upward to Supabase!"
+                    _apiSyncing.value = false
                 }
-                database.getReference("products_trigger").setValue(System.currentTimeMillis().toString())
-                _statusMessage.value = "Pushed $count products upward to Firebase!"
-            } catch (e: Exception) {
-                _errorMessage.value = "Firebase Push Error: ${e.localizedMessage}"
-            } finally {
+            } else {
+                _statusMessage.value = "Local mode active: products saved in local database."
                 _apiSyncing.value = false
             }
         }
     }
 
     /**
-     * Pulls customer orders from the remote REST database.
+     * Pulls customer orders from the remote Supabase database.
      */
     fun syncPullOrders(silent: Boolean = false) {
         _apiSyncing.value = true
         if (!silent) _errorMessage.value = null
         viewModelScope.launch {
-            try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                val ordersRef = database.getReference("orders")
-                ordersRef.get().addOnSuccessListener { snapshot ->
-                    val remoteOrders = mutableListOf<Order>()
-                    for (child in snapshot.children) {
-                        try {
-                            val id = child.child("id").getValue(Long::class.java) ?: 0L
-                            val customerUsername = child.child("customerUsername").getValue(String::class.java) ?: ""
-                            val productId = child.child("productId").getValue(String::class.java) ?: ""
-                            val productName = child.child("productName").getValue(String::class.java) ?: ""
-                            val qty = (child.child("quantityKg").value as? Number)?.toDouble() ?: 0.0
-                            val price = (child.child("totalPrice").value as? Number)?.toDouble() ?: 0.0
-                            val status = child.child("status").getValue(String::class.java) ?: "Pending"
-                            val address = child.child("deliveryAddress").getValue(String::class.java) ?: ""
-                            val amharicName = child.child("amharicName").getValue(String::class.java) ?: ""
-                            val timestamp = child.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
-
-                            remoteOrders.add(Order(
-                                id = id,
-                                customerUsername = customerUsername,
-                                productId = productId,
-                                productName = productName,
-                                amharicName = amharicName,
-                                quantityKg = qty,
-                                totalPrice = price,
-                                status = status,
-                                deliveryAddress = address,
-                                timestamp = timestamp
-                            ))
-                        } catch (e: Exception) {}
-                    }
-                    
-                    if (remoteOrders.isNotEmpty()) {
-                        viewModelScope.launch {
-                            repository.insertOrdersFromApi(remoteOrders)
-                        }
-                        if (!silent) _statusMessage.value = "Downloaded ${remoteOrders.size} active order records from Firebase!"
+            if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val remoteOrders = SupabaseHelper.fetchOrders(getApplication())
+                    if (remoteOrders != null) {
+                        repository.insertOrdersFromApi(remoteOrders)
+                        if (!silent) _statusMessage.value = "Downloaded ${remoteOrders.size} active order records from Supabase!"
                     } else {
-                        if (!silent) _statusMessage.value = "No existing orders retrieved from Firebase."
+                        if (!silent) _errorMessage.value = "Failed to pull orders from Supabase."
                     }
-                    _apiSyncing.value = false
-                }.addOnFailureListener {
-                    if (!silent) _errorMessage.value = "Firebase Pull Error: ${it.localizedMessage}"
                     _apiSyncing.value = false
                 }
-            } catch (e: Exception) {
-                if (!silent) _errorMessage.value = "Firebase Error: ${e.localizedMessage}"
+            } else {
                 _apiSyncing.value = false
             }
         }
@@ -894,47 +946,14 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun syncPullNotifications(silent: Boolean = false) {
         viewModelScope.launch {
-            try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance("https://angel-cheese-supplier-default-rtdb.firebaseio.com")
-                val notificationsRef = database.getReference("notifications")
-                notificationsRef.get().addOnSuccessListener { snapshot ->
-                    val remoteNotifs = mutableListOf<Notification>()
-                    for (userNode in snapshot.children) {
-                        for (child in userNode.children) {
-                            try {
-                                val id = child.child("id").getValue(Long::class.java) ?: 0L
-                                val custUser = child.child("customerUsername").getValue(String::class.java) ?: ""
-                                val orderId = child.child("orderId").getValue(Long::class.java) ?: 0L
-                                val title = child.child("title").getValue(String::class.java) ?: ""
-                                val titleAmharic = child.child("titleAmharic").getValue(String::class.java) ?: ""
-                                val message = child.child("message").getValue(String::class.java) ?: ""
-                                val messageAmharic = child.child("messageAmharic").getValue(String::class.java) ?: ""
-                                val status = child.child("status").getValue(String::class.java) ?: ""
-                                val isRead = child.child("isRead").getValue(Boolean::class.java) ?: false
-                                val timestamp = child.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
-
-                                remoteNotifs.add(Notification(
-                                    id = id,
-                                    customerUsername = custUser,
-                                    orderId = orderId,
-                                    title = title,
-                                    titleAmharic = titleAmharic,
-                                    message = message,
-                                    messageAmharic = messageAmharic,
-                                    status = status,
-                                    isRead = isRead,
-                                    timestamp = timestamp
-                                ))
-                            } catch (e: Exception) {}
-                        }
-                    }
-                    if (remoteNotifs.isNotEmpty()) {
-                        viewModelScope.launch {
-                            repository.replaceNotificationsFromApi(remoteNotifs)
-                        }
+            if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val remoteNotifs = SupabaseHelper.fetchNotifications(getApplication())
+                    if (remoteNotifs != null) {
+                        repository.replaceNotificationsFromApi(remoteNotifs)
                     }
                 }
-            } catch (e: Exception) {}
+            }
         }
     }
 

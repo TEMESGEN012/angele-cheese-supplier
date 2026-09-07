@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -16,7 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -24,6 +27,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.ui.theme.FarmGreenPrimary
 import com.example.ui.theme.ButterGoldSecondary
 import com.example.ui.viewmodel.AppScreen
@@ -92,14 +96,19 @@ fun AuthScreen(viewModel: DairyViewModel) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Text(
-                            text = "🥛",
-                            fontSize = 44.sp,
-                            modifier = Modifier.padding(end = 12.dp)
+                        Image(
+                            painter = painterResource(id = R.drawable.angle_dairy_logo_1788019533593),
+                            contentDescription = "Angle Ethiopian Ayib Logo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .padding(end = 0.dp)
                         )
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "ANGEL ETHIOPIAN CHEESE",
+                                text = "ANGLE ETHIOPIAN CHEESE",
                                 style = MaterialTheme.typography.headlineSmall.copy(
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color.White,
@@ -107,7 +116,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                                 )
                             )
                             Text(
-                                text = "አንጀል የኢትዮጵያ አይብ", // Amharic translation for "ANGEL ETHIOPIAN CHEESE"
+                                text = "አንግል የኢትዮጵያ አይብ",
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = ButterGoldSecondary

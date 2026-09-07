@@ -338,8 +338,10 @@ class DairyRepository(
         // Deduct from catalog
         productDao.updatePriceAndStock(productId, product.pricePerKg, newStock)
 
-        // Record the transaction order
+        // Record the transaction order with unique epoch ID
+        val generatedOrderId = System.currentTimeMillis()
         val order = Order(
+            id = generatedOrderId,
             customerUsername = customerUsername,
             productId = productId,
             productName = product.name,
@@ -347,41 +349,47 @@ class DairyRepository(
             quantityKg = quantity,
             totalPrice = totalPrice,
             status = "Pending",
-            deliveryAddress = deliveryAddress
+            deliveryAddress = deliveryAddress,
+            timestamp = generatedOrderId
         )
-        val orderId = orderDao.insertOrder(order)
+        orderDao.insertOrder(order)
 
         // Insert notification for admin about a new order coming ("order arrived")
         try {
+            val adminNotifId = generatedOrderId + 1
             notificationDao.insertNotification(
                 Notification(
+                    id = adminNotifId,
                     customerUsername = "admin",
-                    orderId = orderId,
+                    orderId = generatedOrderId,
                     title = "New Order Arrived!",
                     titleAmharic = "አዲስ ትዕዛዝ ደርሷል!",
-                    message = "Order #ORD-$orderId was placed by $customerUsername for $quantity ${getUnitPlural(product.name, quantity)} of ${product.name}.",
-                    messageAmharic = "ትዕዛዝ ቁጥር #ORD-$orderId በ $customerUsername ተመዝግቧል (${quantity} ${product.amharicName})።",
+                    message = "Order #ORD-$generatedOrderId was placed by $customerUsername for $quantity ${getUnitPlural(product.name, quantity)} of ${product.name}.",
+                    messageAmharic = "ትዕዛዝ ቁጥር #ORD-$generatedOrderId በ $customerUsername ተመዝግቧል (${quantity} ${product.amharicName})።",
                     status = "Pending",
                     isRead = false,
-                    timestamp = System.currentTimeMillis()
+                    timestamp = adminNotifId
                 )
             )
         } catch (e: Exception) {}
 
         // Log transaction movement
+        val logId = generatedOrderId + 2
         stockLogDao.insertLog(
             StockLog(
+                id = logId,
                 productId = productId,
                 productName = product.name,
                 changeAmount = -quantity,
                 previousStock = product.stockKg,
                 newStock = newStock,
-                reason = "Order placed #ORD-${orderId}",
-                operator = operatorName
+                reason = "Order placed #ORD-${generatedOrderId}",
+                operator = operatorName,
+                timestamp = logId
             )
         )
 
-        Result.success(orderId)
+        Result.success(generatedOrderId)
     }
 
     /**

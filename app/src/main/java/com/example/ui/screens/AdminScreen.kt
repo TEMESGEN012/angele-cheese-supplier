@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,13 +22,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
+import com.example.data.api.RealtimeConnectionStatus
 import com.example.data.model.Order
 import com.example.data.model.Product
 import com.example.data.model.StockLog
@@ -78,6 +83,8 @@ fun AdminScreen(viewModel: DairyViewModel) {
 
     val adminNotifications by viewModel.adminNotificationsList.collectAsState()
     val unreadAdminCount = remember(adminNotifications) { adminNotifications.count { !it.isRead } }
+    val adminOrderPopup by viewModel.adminOrderPopup.collectAsState()
+    val realtimeStatus by viewModel.realtimeConnectionStatus.collectAsState()
     var showAdminNotificationsDialog by remember { mutableStateOf(false) }
 
     var activeTab by remember { mutableStateOf(0) } // 0: Inventory, 1: Customer Orders, 2: Stock Logs
@@ -135,6 +142,7 @@ fun AdminScreen(viewModel: DairyViewModel) {
 
     // App Update Configuration state
     var showAppUpdateConfigDialog by remember { mutableStateOf(false) }
+    var showDatabaseSettingsDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -222,6 +230,18 @@ fun AdminScreen(viewModel: DairyViewModel) {
                             }
                             IconButton(
                                 onClick = {
+                                    showDatabaseSettingsDialog = true
+                                },
+                                modifier = Modifier.testTag("admin_database_settings_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Dns,
+                                    contentDescription = "Database Settings",
+                                    tint = Color.White
+                                )
+                            }
+                            IconButton(
+                                onClick = {
                                     adminUsernameInput = currentUser?.username ?: ""
                                     adminPasswordInput = ""
                                     adminConfirmPasswordInput = ""
@@ -264,55 +284,117 @@ fun AdminScreen(viewModel: DairyViewModel) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "ANGEL ETHIOPIAN CHEESE",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White,
-                                    letterSpacing = 0.3.sp
-                                )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = R.drawable.angle_dairy_logo_1788019533593),
+                                contentDescription = "Angle Ethiopian Ayib Logo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
                             )
-                            Text(
-                                text = "አንጀል የኢትዮጵያ አይብ (አስተዳዳሪ)",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = ButterGoldSecondary,
-                                    fontSize = 10.sp
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "ANGLE ETHIOPIAN CHEESE",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White,
+                                        letterSpacing = 0.3.sp
+                                    )
                                 )
-                            )
+                                Text(
+                                    text = "አንግል የኢትዮጵያ አይብ (አስተዳዳሪ)",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = ButterGoldSecondary,
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
                         }
 
-                        // Prominent Gold Add Product Button in the green header
-                        Button(
-                            onClick = {
-                                newIdInput = ""
-                                newNameInput = ""
-                                newAmharicNameInput = ""
-                                newCategoryInput = "Dairy (የወተት)"
-                                newPriceInput = ""
-                                newStockInput = ""
-                                newUnitNameInput = "kg"
-                                newDescInput = ""
-                                newNutInfoInput = ""
-                                newImageUrlInput = ""
-                                isAddingProduct = true
-                            },
-                            modifier = Modifier.testTag("admin_add_product_header_button").height(28.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = ButterGoldSecondary,
-                                contentColor = FarmGreenPrimary
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        // Realtime connection badge & Add Product button row
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Add Product",
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text("Add Product", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            // Realtime status badge
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = when (realtimeStatus) {
+                                    RealtimeConnectionStatus.CONNECTED -> Color(0xFF1B5E20).copy(alpha = 0.85f)
+                                    RealtimeConnectionStatus.CONNECTING -> Color(0xFFF57F17).copy(alpha = 0.85f)
+                                    RealtimeConnectionStatus.ERROR -> Color(0xFFB71C1C).copy(alpha = 0.85f)
+                                    RealtimeConnectionStatus.DISCONNECTED -> Color.White.copy(alpha = 0.2f)
+                                },
+                                modifier = Modifier
+                                    .clickable { showDatabaseSettingsDialog = true }
+                                    .testTag("admin_realtime_status_badge")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                when (realtimeStatus) {
+                                                    RealtimeConnectionStatus.CONNECTED -> Color(0xFF00E676)
+                                                    RealtimeConnectionStatus.CONNECTING -> Color(0xFFFFD54F)
+                                                    RealtimeConnectionStatus.ERROR -> Color(0xFFFF5252)
+                                                    RealtimeConnectionStatus.DISCONNECTED -> Color.LightGray
+                                                }
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = when (realtimeStatus) {
+                                            RealtimeConnectionStatus.CONNECTED -> "Realtime Live"
+                                            RealtimeConnectionStatus.CONNECTING -> "Connecting..."
+                                            RealtimeConnectionStatus.ERROR -> "Realtime Error"
+                                            RealtimeConnectionStatus.DISCONNECTED -> "Local DB"
+                                        },
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
+                            // Prominent Gold Add Product Button in the green header
+                            Button(
+                                onClick = {
+                                    newIdInput = ""
+                                    newNameInput = ""
+                                    newAmharicNameInput = ""
+                                    newCategoryInput = "Dairy (የወተት)"
+                                    newPriceInput = ""
+                                    newStockInput = ""
+                                    newUnitNameInput = "kg"
+                                    newDescInput = ""
+                                    newNutInfoInput = ""
+                                    newImageUrlInput = ""
+                                    isAddingProduct = true
+                                },
+                                modifier = Modifier.testTag("admin_add_product_header_button").height(28.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = ButterGoldSecondary,
+                                    contentColor = FarmGreenPrimary
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add Product",
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Add Product", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -367,6 +449,31 @@ fun AdminScreen(viewModel: DairyViewModel) {
                 .background(MaterialTheme.colorScheme.background)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
+                // Real-time Pop-up notification message for new incoming customer orders (Admin only)
+                AnimatedVisibility(
+                    visible = adminOrderPopup != null,
+                    enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
+                ) {
+                    adminOrderPopup?.let { popup ->
+                        AdminOrderNotificationPopUpCard(
+                            popup = popup,
+                            onViewOrder = {
+                                activeTab = 1 // Switch to Customer Orders tab
+                                orderSearchQuery = popup.orderId.toString()
+                                orderStatusFilter = "All"
+                                viewModel.dismissAdminOrderPopup()
+                            },
+                            onAcceptOrder = {
+                                viewModel.acceptOrderFromPopup(popup.orderId)
+                            },
+                            onDismiss = {
+                                viewModel.dismissAdminOrderPopup()
+                            }
+                        )
+                    }
+                }
+
                 // Info Toast alerts
                 AnimatedVisibility(visible = errorMessage != null) {
                     Card(
@@ -1512,6 +1619,351 @@ fun AdminScreen(viewModel: DairyViewModel) {
                     }
                 )
             }
+
+            if (showDatabaseSettingsDialog) {
+                val dbType by viewModel.dbType.collectAsState()
+                val supabaseUrl by viewModel.supabaseUrl.collectAsState()
+                val supabaseKey by viewModel.supabaseKey.collectAsState()
+
+                var selectedDbType by remember { mutableStateOf(dbType) }
+                var urlInput by remember { mutableStateOf(supabaseUrl) }
+                var keyInput by remember { mutableStateOf(supabaseKey) }
+                var keyVisible by remember { mutableStateOf(false) }
+
+                var isTestingConnection by remember { mutableStateOf(false) }
+                var testResultText by remember { mutableStateOf<String?>(null) }
+                var testResultSuccess by remember { mutableStateOf<Boolean?>(null) }
+
+                AlertDialog(
+                    onDismissRequest = { showDatabaseSettingsDialog = false },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Dns,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Supabase & Cloud Sync",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Current Realtime Live Status Banner
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = when (realtimeStatus) {
+                                    RealtimeConnectionStatus.CONNECTED -> Color(0xFFE8F5E9)
+                                    RealtimeConnectionStatus.CONNECTING -> Color(0xFFFFF8E1)
+                                    RealtimeConnectionStatus.ERROR -> Color(0xFFFFEBEE)
+                                    RealtimeConnectionStatus.DISCONNECTED -> MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    when (realtimeStatus) {
+                                        RealtimeConnectionStatus.CONNECTED -> Color(0xFF2E7D32)
+                                        RealtimeConnectionStatus.CONNECTING -> Color(0xFFFFA000)
+                                        RealtimeConnectionStatus.ERROR -> Color(0xFFC62828)
+                                        RealtimeConnectionStatus.DISCONNECTED -> MaterialTheme.colorScheme.outlineVariant
+                                    }
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                when (realtimeStatus) {
+                                                    RealtimeConnectionStatus.CONNECTED -> Color(0xFF2E7D32)
+                                                    RealtimeConnectionStatus.CONNECTING -> Color(0xFFFFA000)
+                                                    RealtimeConnectionStatus.ERROR -> Color(0xFFC62828)
+                                                    RealtimeConnectionStatus.DISCONNECTED -> Color.Gray
+                                                }
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = when (realtimeStatus) {
+                                                RealtimeConnectionStatus.CONNECTED -> "Realtime WebSocket: Connected 🟢"
+                                                RealtimeConnectionStatus.CONNECTING -> "Realtime WebSocket: Connecting 🟡"
+                                                RealtimeConnectionStatus.ERROR -> "Realtime WebSocket: Connection Error ⚠️"
+                                                RealtimeConnectionStatus.DISCONNECTED -> "Realtime WebSocket: Inactive / Local DB ⚪"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                            color = when (realtimeStatus) {
+                                                RealtimeConnectionStatus.CONNECTED -> Color(0xFF1B5E20)
+                                                RealtimeConnectionStatus.CONNECTING -> Color(0xFFE65100)
+                                                RealtimeConnectionStatus.ERROR -> Color(0xFFB71C1C)
+                                                RealtimeConnectionStatus.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                        Text(
+                                            text = when (realtimeStatus) {
+                                                RealtimeConnectionStatus.CONNECTED -> "Live updates for orders, products & notifications enabled."
+                                                RealtimeConnectionStatus.CONNECTING -> "Establishing Phoenix WebSocket channel..."
+                                                RealtimeConnectionStatus.ERROR -> "Check credentials & project URL."
+                                                RealtimeConnectionStatus.DISCONNECTED -> "Save Supabase URL & Anon Key to connect."
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = "Database Engine Mode:",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { selectedDbType = "supabase" },
+                                    modifier = Modifier.weight(1f).testTag("select_supabase_button"),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (selectedDbType == "supabase") MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                                    ),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        width = 1.dp,
+                                        color = if (selectedDbType == "supabase") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                    )
+                                ) {
+                                    Text(
+                                        text = "Supabase Cloud",
+                                        fontWeight = if (selectedDbType == "supabase") FontWeight.Bold else FontWeight.Normal,
+                                        color = if (selectedDbType == "supabase") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    onClick = { selectedDbType = "local" },
+                                    modifier = Modifier.weight(1f).testTag("select_local_button"),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (selectedDbType == "local") MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                                    ),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        width = 1.dp,
+                                        color = if (selectedDbType == "local") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                    )
+                                ) {
+                                    Text(
+                                        text = "Local Only",
+                                        fontWeight = if (selectedDbType == "local") FontWeight.Bold else FontWeight.Normal,
+                                        color = if (selectedDbType == "local") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+
+                            if (selectedDbType == "supabase") {
+                                OutlinedTextField(
+                                    value = urlInput,
+                                    onValueChange = { 
+                                        urlInput = it 
+                                        testResultText = null
+                                    },
+                                    label = { Text("Supabase URL") },
+                                    placeholder = { Text("https://xyzcompany.supabase.co") },
+                                    leadingIcon = { Icon(Icons.Default.Link, contentDescription = null) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth().testTag("supabase_url_field")
+                                )
+
+                                OutlinedTextField(
+                                    value = keyInput,
+                                    onValueChange = { 
+                                        keyInput = it 
+                                        testResultText = null
+                                    },
+                                    label = { Text("Supabase Anon Public API Key") },
+                                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                                    visualTransformation = if (keyVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                    trailingIcon = {
+                                        IconButton(onClick = { keyVisible = !keyVisible }) {
+                                            Icon(
+                                                imageVector = if (keyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                                contentDescription = "Toggle Key Visibility"
+                                            )
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth().testTag("supabase_key_field")
+                                )
+
+                                // Action Buttons: Test Connection & Reconnect Realtime
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            if (urlInput.isBlank() || !urlInput.startsWith("http")) {
+                                                testResultSuccess = false
+                                                testResultText = "Enter a valid Supabase URL (https://...)."
+                                                return@OutlinedButton
+                                            }
+                                            if (keyInput.isBlank()) {
+                                                testResultSuccess = false
+                                                testResultText = "Enter your Supabase Anon API key."
+                                                return@OutlinedButton
+                                            }
+                                            isTestingConnection = true
+                                            testResultText = null
+                                            viewModel.testSupabaseConnection(urlInput, keyInput) { success, msg ->
+                                                isTestingConnection = false
+                                                testResultSuccess = success
+                                                testResultText = msg
+                                            }
+                                        },
+                                        enabled = !isTestingConnection,
+                                        modifier = Modifier.weight(1f).testTag("test_supabase_connection_button"),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        if (isTestingConnection) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Testing...", fontSize = 12.sp)
+                                        } else {
+                                            Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Test Conn", fontSize = 12.sp)
+                                        }
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            viewModel.reconnectRealtime()
+                                        },
+                                        modifier = Modifier.weight(1f).testTag("reconnect_realtime_button"),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Reconnect", fontSize = 12.sp)
+                                    }
+                                }
+
+                                // Test Connection feedback alert
+                                if (testResultText != null) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (testResultSuccess == true) Color(0xFFE8F5E9) else Color(0xFFFFEBEE),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = if (testResultSuccess == true) Icons.Default.CheckCircle else Icons.Default.Error,
+                                                contentDescription = null,
+                                                tint = if (testResultSuccess == true) Color(0xFF2E7D32) else Color(0xFFC62828),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = testResultText ?: "",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (testResultSuccess == true) Color(0xFF1B5E20) else Color(0xFFB71C1C)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Setup info note
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = "Supabase Realtime Tables Setup:",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Ensure tables 'orders', 'products', 'notifications', and 'app_config' exist in Supabase and Realtime is enabled:\n`ALTER PUBLICATION supabase_realtime ADD TABLE orders, products, notifications, app_config;`",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            } else {
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            text = "Local Storage Mode",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = "Data is saved securely on this device. Remote synchronization is paused.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (selectedDbType == "supabase") {
+                                    if (urlInput.isBlank() || !urlInput.startsWith("http")) {
+                                        viewModel.setErrorMessage("Please enter a valid Supabase URL starting with http/https.")
+                                        return@Button
+                                    }
+                                    if (keyInput.isBlank()) {
+                                        viewModel.setErrorMessage("Supabase API Key cannot be blank.")
+                                        return@Button
+                                    }
+                                }
+                                viewModel.updateDatabaseSettings(selectedDbType, urlInput, keyInput)
+                                showDatabaseSettingsDialog = false
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.testTag("save_database_settings_button")
+                        ) {
+                            Text("Save & Connect")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDatabaseSettingsDialog = false }) {
+                            Text("Close")
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -1901,6 +2353,236 @@ fun AuditLogCard(log: StockLog) {
                         fontWeight = FontWeight.Bold,
                         color = if (isPositive) Color(0xFF2E7D32) else Color(0xFFC62828)
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Real-time Pop-up notification card for Admin when a customer places an order.
+ * Displays immediate details with quick actions to view or confirm the order.
+ */
+@Composable
+fun AdminOrderNotificationPopUpCard(
+    popup: com.example.ui.viewmodel.AdminOrderPopup,
+    onViewOrder: () -> Unit,
+    onAcceptOrder: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .testTag("admin_new_order_popup_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        border = androidx.compose.foundation.BorderStroke(2.dp, ButterGoldSecondary)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(ButterGoldSecondary.copy(alpha = 0.25f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "🔔", fontSize = 20.sp)
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "New Customer Order!",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = FarmGreenPrimary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = FarmGreenPrimary,
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "#ORD-${popup.orderId}",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "አዲስ የደንበኛ ትዕዛዝ ደርሷል!",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .testTag("admin_popup_close_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Dismiss notification",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Order Content Info
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Customer: ",
+                            style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        )
+                        Text(
+                            text = popup.customerUsername,
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.ShoppingBag,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "${popup.quantityKg} kg of ${popup.productName}",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    if (popup.amharicName.isNotBlank()) {
+                        Text(
+                            text = "(${popup.amharicName})",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            ),
+                            modifier = Modifier.padding(start = 20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = popup.deliveryAddress,
+                            style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // Price Badge
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    modifier = Modifier.padding(start = 8.dp)
+                ) {
+                    Text(
+                        text = "Total Amount",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${String.format("%,.2f", popup.totalPrice)} ETB",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = FarmGreenPrimary
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onViewOrder,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .testTag("admin_popup_view_order_button"),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ReceiptLong,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "View in Orders", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = onAcceptOrder,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .testTag("admin_popup_confirm_button"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = FarmGreenPrimary,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "Confirm Order", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

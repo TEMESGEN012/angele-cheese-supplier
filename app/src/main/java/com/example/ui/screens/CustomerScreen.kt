@@ -38,6 +38,9 @@ import com.example.ui.viewmodel.DairyViewModel
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.theme.FarmGreenPrimary
 import com.example.ui.theme.ButterGoldSecondary
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
 import java.text.SimpleDateFormat
@@ -118,14 +121,18 @@ fun CustomerScreen(viewModel: DairyViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "🥛",
-                                    fontSize = 28.sp,
-                                    modifier = Modifier.padding(end = 8.dp)
+                                Image(
+                                    painter = painterResource(id = R.drawable.angle_dairy_logo_1788019533593),
+                                    contentDescription = "Angle Ethiopian Ayib Logo",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Column {
                                     Text(
-                                        text = "ANGEL ETHIOPIAN CHEESE",
+                                        text = "ANGLE ETHIOPIAN CHEESE",
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             fontWeight = FontWeight.ExtraBold,
                                             color = Color.White,
@@ -133,7 +140,7 @@ fun CustomerScreen(viewModel: DairyViewModel) {
                                         )
                                     )
                                     Text(
-                                        text = "ኤንጀል የኢትዮጵያ አይብ",
+                                        text = "አንግል የኢትዮጵያ አይብ",
                                         style = MaterialTheme.typography.bodyMedium.copy(
                                             fontWeight = FontWeight.Bold,
                                             color = ButterGoldSecondary
