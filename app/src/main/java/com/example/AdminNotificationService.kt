@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.data.SessionManager
 import com.example.data.api.SupabaseHelper
 import com.example.data.api.SupabaseRealtimeManager
 import com.example.data.local.AppDatabase
@@ -20,8 +21,44 @@ import kotlinx.coroutines.launch
 
 class AdminNotificationService : Service() {
 
-    private val CHANNEL_ID = "admin_orders_channel"
-    private val SERVICE_ID = 101
+    companion object {
+        private const val CHANNEL_ID = "admin_orders_channel"
+        private const val SERVICE_ID = 101
+
+        /**
+         * Starts the background order listener ONLY if user is logged in as admin or super admin.
+         */
+        fun start(context: Context) {
+            if (!SessionManager.isAdminOrSuperAdminLoggedIn(context)) {
+                Log.d("AdminNotificationService", "Skipping service start: user is not admin or super admin.")
+                return
+            }
+            try {
+                val serviceIntent = Intent(context, AdminNotificationService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                Log.e("AdminNotificationService", "Failed to start service", e)
+            }
+        }
+
+        /**
+         * Stops the background order listener and removes notifications.
+         */
+        fun stop(context: Context) {
+            try {
+                val serviceIntent = Intent(context, AdminNotificationService::class.java)
+                context.stopService(serviceIntent)
+                val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.cancel(SERVICE_ID)
+            } catch (e: Exception) {
+                Log.e("AdminNotificationService", "Failed to stop service", e)
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -29,6 +66,14 @@ class AdminNotificationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // STRICT PRIVACY CHECK: Only allow service to run if logged in user is admin or super admin
+        if (!SessionManager.isAdminOrSuperAdminLoggedIn(applicationContext)) {
+            Log.d("AdminNotificationService", "Stopping service: user is not logged in as admin or super admin.")
+            stopForeground(true)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         val notification = createForegroundNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(SERVICE_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -52,21 +97,23 @@ class AdminNotificationService : Service() {
         // Register Realtime WebSocket listener for immediate instant push notifications
         SupabaseRealtimeManager.initialize(applicationContext)
         SupabaseRealtimeManager.addOrderListener { order ->
-            if (order.status == "Pending") {
+            if (order.status == "Pending" && SessionManager.isAdminOrSuperAdminLoggedIn(applicationContext)) {
                 showOrderNotification(order.customerUsername, order.productName, order.quantityKg)
             }
         }
 
         CoroutineScope(Dispatchers.IO).launch {
             while (true) {
+                // If the user logged out or switched to a regular customer account, shut down immediately
+                if (!SessionManager.isAdminOrSuperAdminLoggedIn(applicationContext)) {
+                    Log.d("AdminNotificationService", "User logged out or not admin, terminating service loop.")
+                    stopForeground(true)
+                    stopSelf()
+                    break
+                }
+
                 if (SupabaseHelper.isSupabaseEnabled(applicationContext)) {
                     try {
-                        val remoteProducts = SupabaseHelper.fetchProducts(applicationContext)
-                        if (remoteProducts != null && remoteProducts.isNotEmpty()) {
-                            val db = AppDatabase.getDatabase(applicationContext)
-                            remoteProducts.forEach { db.productDao().insertProduct(it) }
-                        }
-
                         val remoteOrders = SupabaseHelper.fetchOrders(applicationContext)
                         if (remoteOrders != null) {
                             val db = AppDatabase.getDatabase(applicationContext)
@@ -74,27 +121,28 @@ class AdminNotificationService : Service() {
                                 val existing = db.orderDao().getOrderById(order.id)
                                 db.orderDao().insertOrder(order)
                                 if (existing == null && order.status == "Pending" && (isInitialOrdersLoaded || order.timestamp > serviceStartTime)) {
-                                    showOrderNotification(order.customerUsername, order.productName, order.quantityKg)
+                                    if (SessionManager.isAdminOrSuperAdminLoggedIn(applicationContext)) {
+                                        showOrderNotification(order.customerUsername, order.productName, order.quantityKg)
+                                    }
                                 }
                             }
                             isInitialOrdersLoaded = true
                         }
-
-                        val remoteNotifs = SupabaseHelper.fetchNotifications(applicationContext)
-                        if (remoteNotifs != null && remoteNotifs.isNotEmpty()) {
-                            val db = AppDatabase.getDatabase(applicationContext)
-                            remoteNotifs.forEach { db.notificationDao().insertNotification(it) }
-                        }
                     } catch (e: Exception) {
-                        Log.e("AdminService", "Supabase sync error", e)
+                        Log.w("AdminService", "Supabase sync notice: ${e.message}")
                     }
                 }
-                kotlinx.coroutines.delay(8000)
+                kotlinx.coroutines.delay(25000)
             }
         }
     }
 
     private fun showOrderNotification(customer: String, product: String, qty: Double) {
+        // Double check admin role before posting any system notification
+        if (!SessionManager.isAdminOrSuperAdminLoggedIn(applicationContext)) {
+            return
+        }
+
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
@@ -123,8 +171,8 @@ class AdminNotificationService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Sync Service Active")
-            .setContentText("Monitoring orders and catalog updates...")
+            .setContentTitle("Admin Order Listener Active")
+            .setContentText("Listening for customer orders...")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)

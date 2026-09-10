@@ -21,6 +21,7 @@ import com.example.ui.screens.ForceUpdateScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.DairyViewModel
+import com.example.data.SessionManager
 import android.content.Intent
 import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,7 +37,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Setup notification permission (Android 13+) and start Admin notifier background service
+        // Setup notification permission (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val launcher = registerForActivityResult(
                 ActivityResultContracts.RequestPermission()
@@ -44,12 +45,11 @@ class MainActivity : ComponentActivity() {
             launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         
-        // Start foreground listener service so it remains active in the background continuously
-        val serviceIntent = Intent(this, AdminNotificationService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent)
+        // Start foreground listener service ONLY if current user is logged in as admin or super admin
+        if (SessionManager.isAdminOrSuperAdminLoggedIn(this)) {
+            AdminNotificationService.start(this)
         } else {
-            startService(serviceIntent)
+            AdminNotificationService.stop(this)
         }
         
         setContent {

@@ -28,8 +28,10 @@ object SupabaseHelper {
         .build()
 
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .writeTimeout(25, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private fun getPrefs(context: Context) =
@@ -89,25 +91,89 @@ object SupabaseHelper {
         return requestBuilder.build()
     }
 
+    private inline fun <T> executeRequestWithRetry(
+        context: Context,
+        path: String,
+        method: String,
+        jsonBody: String? = null,
+        parser: (String) -> T?
+    ): T? {
+        val request = buildRequest(context, path, method, jsonBody) ?: return null
+        val maxAttempts = 2
+        var lastCode = 0
+
+        for (attempt in 1..maxAttempts) {
+            try {
+                okHttpClient.newCall(request).execute().use { response ->
+                    lastCode = response.code
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: return null
+                        return parser(body)
+                    } else if (response.code in listOf(502, 503, 504)) {
+                        Log.w(TAG, "$path server gateway notice: ${response.code} (attempt $attempt/$maxAttempts)")
+                        if (attempt < maxAttempts) {
+                            try { Thread.sleep(1500L) } catch (_: InterruptedException) {}
+                        }
+                    } else {
+                        Log.w(TAG, "$path request unfulfilled: ${response.code} ${response.message}")
+                        return null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "$path attempt $attempt/$maxAttempts network warning: ${e.message}")
+                if (attempt < maxAttempts) {
+                    try { Thread.sleep(1500L) } catch (_: InterruptedException) {}
+                }
+            }
+        }
+        if (lastCode in listOf(502, 503, 504)) {
+            Log.w(TAG, "$path server gateway timeout ($lastCode). Continuing with local Room database.")
+        }
+        return null
+    }
+
+    private fun executeBooleanWithRetry(
+        context: Context,
+        path: String,
+        method: String,
+        jsonBody: String? = null
+    ): Boolean {
+        val request = buildRequest(context, path, method, jsonBody) ?: return false
+        val maxAttempts = 2
+
+        for (attempt in 1..maxAttempts) {
+            try {
+                okHttpClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        return true
+                    } else if (response.code in listOf(502, 503, 504)) {
+                        Log.w(TAG, "$path server gateway notice: ${response.code} (attempt $attempt/$maxAttempts)")
+                        if (attempt < maxAttempts) {
+                            try { Thread.sleep(1500L) } catch (_: InterruptedException) {}
+                        }
+                    } else {
+                        Log.w(TAG, "$path boolean request unfulfilled: ${response.code}")
+                        return false
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "$path boolean attempt $attempt/$maxAttempts error: ${e.message}")
+                if (attempt < maxAttempts) {
+                    try { Thread.sleep(1500L) } catch (_: InterruptedException) {}
+                }
+            }
+        }
+        return false
+    }
+
     // --- App Config Sync ---
 
     fun fetchAppConfig(context: Context): SupabaseAppConfig? {
-        val request = buildRequest(context, "app_config?id=eq.1&select=*", "GET") ?: return null
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "fetchAppConfig failed: ${response.code} ${response.message}")
-                    return null
-                }
-                val responseBody = response.body?.string() ?: return null
-                val listType = Types.newParameterizedType(List::class.java, SupabaseAppConfig::class.java)
-                val listAdapter = moshi.adapter<List<SupabaseAppConfig>>(listType)
-                val list = listAdapter.fromJson(responseBody)
-                list?.firstOrNull()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching app config from Supabase", e)
-            null
+        return executeRequestWithRetry(context, "app_config?id=eq.1&select=*", "GET") { responseBody ->
+            val listType = Types.newParameterizedType(List::class.java, SupabaseAppConfig::class.java)
+            val listAdapter = moshi.adapter<List<SupabaseAppConfig>>(listType)
+            val list = listAdapter.fromJson(responseBody)
+            list?.firstOrNull()
         }
     }
 
@@ -115,175 +181,62 @@ object SupabaseHelper {
         val config = SupabaseAppConfig(id = 1, minimum_version_code = minCode, update_url = url)
         val adapter = moshi.adapter(SupabaseAppConfig::class.java)
         val json = adapter.toJson(config)
-        
-        // PostgREST upsert works by POST with Prefer: resolution=merge-duplicates
-        val request = buildRequest(context, "app_config", "POST", json) ?: return false
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "updateAppConfig failed: ${response.code} ${response.body?.string()}")
-                    false
-                } else {
-                    true
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error updating app config on Supabase", e)
-            false
-        }
+        return executeBooleanWithRetry(context, "app_config", "POST", json)
     }
 
     // --- Products Sync ---
 
     fun fetchProducts(context: Context): List<Product>? {
-        val request = buildRequest(context, "products?select=*", "GET") ?: return null
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "fetchProducts failed: ${response.code}")
-                    return null
-                }
-                val responseBody = response.body?.string() ?: return null
-                val listType = Types.newParameterizedType(List::class.java, Product::class.java)
-                val adapter = moshi.adapter<List<Product>>(listType)
-                adapter.fromJson(responseBody)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching products from Supabase", e)
-            null
+        return executeRequestWithRetry(context, "products?select=*", "GET") { responseBody ->
+            val listType = Types.newParameterizedType(List::class.java, Product::class.java)
+            val adapter = moshi.adapter<List<Product>>(listType)
+            adapter.fromJson(responseBody)
         }
     }
 
     fun upsertProduct(context: Context, product: Product): Boolean {
         val adapter = moshi.adapter(Product::class.java)
         val json = adapter.toJson(product)
-        val request = buildRequest(context, "products", "POST", json) ?: return false
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "upsertProduct failed: ${response.code} ${response.body?.string()}")
-                    false
-                } else {
-                    true
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error upserting product on Supabase", e)
-            false
-        }
+        return executeBooleanWithRetry(context, "products", "POST", json)
     }
 
     fun deleteProduct(context: Context, id: String): Boolean {
-        val request = buildRequest(context, "products?id=eq.$id", "DELETE") ?: return false
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "deleteProduct failed: ${response.code}")
-                    false
-                } else {
-                    true
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error deleting product on Supabase", e)
-            false
-        }
+        return executeBooleanWithRetry(context, "products?id=eq.$id", "DELETE")
     }
 
     // --- Orders Sync ---
 
     fun fetchOrders(context: Context): List<Order>? {
-        val request = buildRequest(context, "orders?select=*", "GET") ?: return null
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "fetchOrders failed: ${response.code}")
-                    return null
-                }
-                val responseBody = response.body?.string() ?: return null
-                val listType = Types.newParameterizedType(List::class.java, Order::class.java)
-                val adapter = moshi.adapter<List<Order>>(listType)
-                adapter.fromJson(responseBody)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching orders from Supabase", e)
-            null
+        return executeRequestWithRetry(context, "orders?select=*", "GET") { responseBody ->
+            val listType = Types.newParameterizedType(List::class.java, Order::class.java)
+            val adapter = moshi.adapter<List<Order>>(listType)
+            adapter.fromJson(responseBody)
         }
     }
 
     fun upsertOrder(context: Context, order: Order): Boolean {
         val adapter = moshi.adapter(Order::class.java)
         val json = adapter.toJson(order)
-        val request = buildRequest(context, "orders", "POST", json) ?: return false
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "upsertOrder failed: ${response.code} ${response.body?.string()}")
-                    false
-                } else {
-                    true
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error upserting order on Supabase", e)
-            false
-        }
+        return executeBooleanWithRetry(context, "orders", "POST", json)
     }
 
     fun deleteOrder(context: Context, id: Long): Boolean {
-        val request = buildRequest(context, "orders?id=eq.$id", "DELETE") ?: return false
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "deleteOrder failed: ${response.code}")
-                    false
-                } else {
-                    true
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error deleting order on Supabase", e)
-            false
-        }
+        return executeBooleanWithRetry(context, "orders?id=eq.$id", "DELETE")
     }
 
     // --- Notifications Sync ---
 
     fun fetchNotifications(context: Context): List<Notification>? {
-        val request = buildRequest(context, "notifications?select=*", "GET") ?: return null
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "fetchNotifications failed: ${response.code}")
-                    return null
-                }
-                val responseBody = response.body?.string() ?: return null
-                val listType = Types.newParameterizedType(List::class.java, Notification::class.java)
-                val adapter = moshi.adapter<List<Notification>>(listType)
-                adapter.fromJson(responseBody)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching notifications from Supabase", e)
-            null
+        return executeRequestWithRetry(context, "notifications?select=*", "GET") { responseBody ->
+            val listType = Types.newParameterizedType(List::class.java, Notification::class.java)
+            val adapter = moshi.adapter<List<Notification>>(listType)
+            adapter.fromJson(responseBody)
         }
     }
 
     fun upsertNotification(context: Context, notification: Notification): Boolean {
         val adapter = moshi.adapter(Notification::class.java)
         val json = adapter.toJson(notification)
-        val request = buildRequest(context, "notifications", "POST", json) ?: return false
-        return try {
-            okHttpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "upsertNotification failed: ${response.code} ${response.body?.string()}")
-                    false
-                } else {
-                    true
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error upserting notification on Supabase", e)
-            false
-        }
+        return executeBooleanWithRetry(context, "notifications", "POST", json)
     }
 }

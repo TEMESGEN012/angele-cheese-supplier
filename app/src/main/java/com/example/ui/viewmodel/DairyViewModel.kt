@@ -18,6 +18,8 @@ import com.example.data.model.StockLog
 import com.example.data.model.User
 import com.example.data.model.Notification
 import com.example.data.repository.DairyRepository
+import com.example.data.SessionManager
+import com.example.AdminNotificationService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -104,12 +106,45 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateUrl = MutableStateFlow("https://gitlab.com")
     val updateUrl: StateFlow<String> = _updateUrl.asStateFlow()
 
+    // Interactive error/success Toast-like messages
+    private val _statusMessage = MutableStateFlow<String?>(null)
+    val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    // Current Session State
+    private val _currentUser = MutableStateFlow<User?>(null)
+    val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
+
+    // Guest checkout session tracking state
+    private val _guestUsername = MutableStateFlow<String?>(null)
+    val guestUsername: StateFlow<String?> = _guestUsername.asStateFlow()
+
+    private val _guestName = MutableStateFlow<String?>(null)
+    val guestName: StateFlow<String?> = _guestName.asStateFlow()
+
     // Real-time Database connection handling
     init {
+        // Restore session if previously logged in
+        val savedUser = SessionManager.getSavedUser(application)
+        if (savedUser != null) {
+            _currentUser.value = savedUser
+            if (SessionManager.isAdminOrSuperAdmin(savedUser.role)) {
+                _currentScreen.value = AppScreen.AdminHome
+                AdminNotificationService.start(application)
+            } else {
+                _currentScreen.value = AppScreen.CustomerHome
+                AdminNotificationService.stop(application)
+            }
+        } else {
+            AdminNotificationService.stop(application)
+        }
+
         // Initialize Supabase Realtime WebSocket Connection & Listener
         SupabaseRealtimeManager.initialize(application)
         SupabaseRealtimeManager.addOrderListener { order ->
-            if (_currentUser.value?.role == "admin") {
+            if (SessionManager.isAdminOrSuperAdmin(_currentUser.value?.role)) {
                 triggerAdminOrderPopup(order)
             }
         }
@@ -134,9 +169,11 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 syncPullOrders(silent = true)
                 syncPullNotifications(silent = true)
 
-                // Poll Supabase every 8 seconds to guarantee real-time sync even across devices / mobile data
+                // Periodic sync loop (Realtime WebSocket handles instantaneous live changes)
                 while (true) {
-                    kotlinx.coroutines.delay(8000)
+                    val isRealtimeConnected = SupabaseRealtimeManager.connectionStatus.value == RealtimeConnectionStatus.CONNECTED
+                    val delayMs = if (isRealtimeConnected) 45000L else 20000L
+                    kotlinx.coroutines.delay(delayMs)
                     if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
                         val latestConfig = SupabaseHelper.fetchAppConfig(getApplication())
                         if (latestConfig != null) {
@@ -153,7 +190,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Real-time observer for new incoming customer orders (triggers popup ONLY for admin logged in user)
+        // Real-time observer for new incoming customer orders (triggers popup ONLY for admin or super admin logged in user)
         viewModelScope.launch {
             repository.allOrders.collect { orders ->
                 if (!isOrderTrackingInitialized) {
@@ -163,8 +200,8 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                     val newlyArrived = orders.filter { it.id !in knownOrderIds }
                     orders.forEach { knownOrderIds.add(it.id) }
 
-                    // Only show notification pop up if user is currently logged in as admin
-                    if (_currentUser.value?.role == "admin" && newlyArrived.isNotEmpty()) {
+                    // Only show notification pop up if user is currently logged in as admin or super admin
+                    if (SessionManager.isAdminOrSuperAdmin(_currentUser.value?.role) && newlyArrived.isNotEmpty()) {
                         val latestPending = newlyArrived.filter { it.status == "Pending" }.maxByOrNull { it.timestamp }
                             ?: newlyArrived.lastOrNull()
                         if (latestPending != null) {
@@ -175,24 +212,6 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
-    // Interactive error/success Toast-like messages
-    private val _statusMessage = MutableStateFlow<String?>(null)
-    val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
-
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
-
-    // Current Session State
-    private val _currentUser = MutableStateFlow<User?>(null)
-    val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
-
-    // Guest checkout session tracking state
-    private val _guestUsername = MutableStateFlow<String?>(null)
-    val guestUsername: StateFlow<String?> = _guestUsername.asStateFlow()
-
-    private val _guestName = MutableStateFlow<String?>(null)
-    val guestName: StateFlow<String?> = _guestName.asStateFlow()
 
     // Real-time responsive products list
     val productsList: StateFlow<List<Product>> = repository.allProducts.stateIn(
@@ -267,8 +286,8 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun triggerAdminOrderPopup(order: Order) {
-        // STRICT CHECK: Popup notification message is ONLY shown for the admin logged-in user
-        if (_currentUser.value?.role == "admin") {
+        // STRICT CHECK: Popup notification message is ONLY shown for admin or super admin logged-in user
+        if (SessionManager.isAdminOrSuperAdmin(_currentUser.value?.role)) {
             _adminOrderPopup.value = AdminOrderPopup(
                 orderId = order.id,
                 customerUsername = order.customerUsername,
@@ -315,13 +334,16 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 _currentUser.value = user
                 _cartMap.value = emptyMap() // clear cart
                 _statusMessage.value = "Logged in as ${user.fullName}"
-                if (user.role == "admin") {
+                SessionManager.saveUser(getApplication(), user)
+                if (SessionManager.isAdminOrSuperAdmin(user.role)) {
                     // Populate known order IDs so we only alert for newly incoming orders during active admin session
                     adminOrdersList.value.forEach { knownOrderIds.add(it.id) }
                     _currentScreen.value = AppScreen.AdminHome
+                    AdminNotificationService.start(getApplication())
                 } else {
                     _adminOrderPopup.value = null
                     _currentScreen.value = AppScreen.CustomerHome
+                    AdminNotificationService.stop(getApplication())
                 }
             }.onFailure { th ->
                 _errorMessage.value = th.message ?: "Authentication failed."
@@ -356,12 +378,15 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 _currentUser.value = user
                 _cartMap.value = emptyMap()
                 _statusMessage.value = "Successfully registered your account!"
-                if (user.role == "admin") {
+                SessionManager.saveUser(getApplication(), user)
+                if (SessionManager.isAdminOrSuperAdmin(user.role)) {
                     adminOrdersList.value.forEach { knownOrderIds.add(it.id) }
                     _currentScreen.value = AppScreen.AdminHome
+                    AdminNotificationService.start(getApplication())
                 } else {
                     _adminOrderPopup.value = null
                     _currentScreen.value = AppScreen.CustomerHome
+                    AdminNotificationService.stop(getApplication())
                 }
             }.onFailure { th ->
                 _errorMessage.value = th.message ?: "Registration error."
@@ -373,6 +398,8 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      * Log out current user safely.
      */
     fun logout() {
+        SessionManager.clearUser(getApplication())
+        AdminNotificationService.stop(getApplication())
         _currentUser.value = null
         _guestUsername.value = null
         _guestName.value = null
@@ -550,7 +577,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun adminUpdateProduct(productId: String, price: Double, stock: Double) {
         val user = _currentUser.value
-        if (user == null || user.role != "admin") {
+        if (user == null || !SessionManager.isAdminOrSuperAdmin(user.role)) {
             _errorMessage.value = "Unauthorized operation."
             return
         }
@@ -628,7 +655,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun adminAddProduct(product: Product) {
         val user = _currentUser.value
-        if (user == null || user.role != "admin") {
+        if (user == null || !SessionManager.isAdminOrSuperAdmin(user.role)) {
             _errorMessage.value = "Unauthorized operation."
             return
         }
@@ -660,7 +687,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun adminEditProduct(product: Product) {
         val user = _currentUser.value
-        if (user == null || user.role != "admin") {
+        if (user == null || !SessionManager.isAdminOrSuperAdmin(user.role)) {
             _errorMessage.value = "Unauthorized operation."
             return
         }
@@ -692,7 +719,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun adminDeleteProduct(productId: String) {
         val user = _currentUser.value
-        if (user == null || user.role != "admin") {
+        if (user == null || !SessionManager.isAdminOrSuperAdmin(user.role)) {
             _errorMessage.value = "Unauthorized operation."
             return
         }
@@ -716,7 +743,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun adminDeleteOrder(orderId: Long) {
         val user = _currentUser.value
-        if (user == null || user.role != "admin") {
+        if (user == null || !SessionManager.isAdminOrSuperAdmin(user.role)) {
             _errorMessage.value = "Unauthorized operation."
             return
         }
@@ -736,7 +763,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun adminClearAllLogs() {
         val user = _currentUser.value
-        if (user == null || user.role != "admin") {
+        if (user == null || !SessionManager.isAdminOrSuperAdmin(user.role)) {
             _errorMessage.value = "Unauthorized operation."
             return
         }
@@ -751,7 +778,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun adminQuickAdjustStock(productId: String, delta: Double) {
         val user = _currentUser.value
-        if (user == null || user.role != "admin") {
+        if (user == null || !SessionManager.isAdminOrSuperAdmin(user.role)) {
             _errorMessage.value = "Unauthorized operation."
             return
         }
@@ -774,7 +801,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun adminUpdateMinVersion(versionCode: Int, updateUrl: String) {
         val user = _currentUser.value
-        if (user == null || user.role != "admin") {
+        if (user == null || !SessionManager.isAdminOrSuperAdmin(user.role)) {
             _errorMessage.value = "Unauthorized operation."
             return
         }
@@ -811,6 +838,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             repository.updateAdminCredentials(user.username, newUsername, newPasswordPlain)
                 .onSuccess { updatedUser ->
                     _currentUser.value = updatedUser
+                    SessionManager.saveUser(getApplication(), updatedUser)
                     _statusMessage.value = "Credentials updated successfully! Logged in as: ${updatedUser.username}"
                 }
                 .onFailure { th ->
@@ -876,18 +904,24 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     fun syncPullProducts(silent: Boolean = false) {
         _apiSyncing.value = true
         if (!silent) _errorMessage.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
-                viewModelScope.launch(Dispatchers.IO) {
-                    val remoteList = SupabaseHelper.fetchProducts(getApplication())
-                    if (remoteList != null) {
+                val remoteList = SupabaseHelper.fetchProducts(getApplication())
+                if (remoteList != null) {
+                    if (remoteList.isNotEmpty()) {
                         repository.insertProductsFromApi(remoteList)
-                        if (!silent) _statusMessage.value = "Pulled ${remoteList.size} products from Supabase successfully!"
+                        if (!silent) _statusMessage.value = "Pulled ${remoteList.size} products from cloud successfully!"
                     } else {
-                        if (!silent) _errorMessage.value = "Failed to pull products from Supabase."
+                        // Remote table is currently empty; auto-seed products from local repository
+                        val currentLocal = repository.getCurrentProductsList()
+                        if (currentLocal.isNotEmpty()) {
+                            currentLocal.forEach { SupabaseHelper.upsertProduct(getApplication(), it) }
+                        }
                     }
-                    _apiSyncing.value = false
+                } else {
+                    if (!silent) _statusMessage.value = "Using local offline products."
                 }
+                _apiSyncing.value = false
             } else {
                 _apiSyncing.value = false
             }
@@ -901,18 +935,16 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         _apiSyncing.value = true
         _errorMessage.value = null
         val list = productsList.value
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
-                viewModelScope.launch(Dispatchers.IO) {
-                    var count = 0
-                    list.forEach { prod ->
-                        if (SupabaseHelper.upsertProduct(getApplication(), prod)) {
-                            count++
-                        }
+                var count = 0
+                list.forEach { prod ->
+                    if (SupabaseHelper.upsertProduct(getApplication(), prod)) {
+                        count++
                     }
-                    _statusMessage.value = "Pushed $count products upward to Supabase!"
-                    _apiSyncing.value = false
                 }
+                _statusMessage.value = "Pushed $count products upward to Supabase!"
+                _apiSyncing.value = false
             } else {
                 _statusMessage.value = "Local mode active: products saved in local database."
                 _apiSyncing.value = false
@@ -926,18 +958,16 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     fun syncPullOrders(silent: Boolean = false) {
         _apiSyncing.value = true
         if (!silent) _errorMessage.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             if (SupabaseHelper.isSupabaseEnabled(getApplication())) {
-                viewModelScope.launch(Dispatchers.IO) {
-                    val remoteOrders = SupabaseHelper.fetchOrders(getApplication())
-                    if (remoteOrders != null) {
-                        repository.insertOrdersFromApi(remoteOrders)
-                        if (!silent) _statusMessage.value = "Downloaded ${remoteOrders.size} active order records from Supabase!"
-                    } else {
-                        if (!silent) _errorMessage.value = "Failed to pull orders from Supabase."
-                    }
-                    _apiSyncing.value = false
+                val remoteOrders = SupabaseHelper.fetchOrders(getApplication())
+                if (remoteOrders != null) {
+                    repository.insertOrdersFromApi(remoteOrders)
+                    if (!silent) _statusMessage.value = "Downloaded ${remoteOrders.size} active order records from Supabase!"
+                } else {
+                    if (!silent) _statusMessage.value = "Using local offline orders."
                 }
+                _apiSyncing.value = false
             } else {
                 _apiSyncing.value = false
             }

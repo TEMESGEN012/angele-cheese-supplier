@@ -296,19 +296,11 @@ fun AdminScreen(viewModel: DairyViewModel) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 Text(
-                                    text = "ANGLE ETHIOPIAN CHEESE",
+                                    text = "ANGLE ETHIOPIAN CHEESE (ADMIN)",
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontWeight = FontWeight.ExtraBold,
                                         color = Color.White,
                                         letterSpacing = 0.3.sp
-                                    )
-                                )
-                                Text(
-                                    text = "አንግል የኢትዮጵያ አይብ (አስተዳዳሪ)",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = ButterGoldSecondary,
-                                        fontSize = 10.sp
                                     )
                                 )
                             }

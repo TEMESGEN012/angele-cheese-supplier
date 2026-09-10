@@ -115,13 +115,6 @@ fun AuthScreen(viewModel: DairyViewModel) {
                                     letterSpacing = 0.5.sp
                                 )
                             )
-                            Text(
-                                text = "አንግል የኢትዮጵያ አይብ",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = ButterGoldSecondary
-                                )
-                            )
                         }
                     }
                     Text(

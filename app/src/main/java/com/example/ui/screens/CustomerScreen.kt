@@ -139,13 +139,6 @@ fun CustomerScreen(viewModel: DairyViewModel) {
                                             letterSpacing = 0.5.sp
                                         )
                                     )
-                                    Text(
-                                        text = "አንግል የኢትዮጵያ አይብ",
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = ButterGoldSecondary
-                                        )
-                                    )
                                 }
                             }
 

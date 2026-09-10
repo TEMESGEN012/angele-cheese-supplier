@@ -661,6 +661,10 @@ class DairyRepository(
         productDao.insertProducts(products)
     }
 
+    suspend fun getCurrentProductsList(): List<Product> = withContext(Dispatchers.IO) {
+        productDao.getProductList()
+    }
+
     suspend fun insertOrdersFromApi(orders: List<Order>) {
         orders.forEach { order ->
             orderDao.insertOrder(order)
