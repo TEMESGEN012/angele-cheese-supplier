@@ -2,6 +2,8 @@ package com.example.data.api
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import com.example.data.local.AppDatabase
 import com.example.data.model.Notification
@@ -24,6 +26,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -59,6 +62,18 @@ object SupabaseRealtimeManager {
     private var reconnectJob: Job? = null
     private val messageRef = AtomicInteger(1)
     private var appContext: Context? = null
+    private var retryAttempts = 0
+
+    fun isNetworkAvailable(context: Context): Boolean {
+        return try {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val network = connectivityManager?.activeNetwork ?: return false
+            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        } catch (_: Exception) {
+            true
+        }
+    }
 
     // Listeners for real-time incoming orders to immediately notify the UI & Background Services
     private val orderListeners = java.util.concurrent.CopyOnWriteArrayList<(Order) -> Unit>()
@@ -94,7 +109,7 @@ object SupabaseRealtimeManager {
         try {
             webSocket?.close(1000, "Normal closure")
         } catch (e: Exception) {
-            Log.e(TAG, "Error closing websocket", e)
+            Log.w(TAG, "Notice closing websocket: ${e.message}")
         }
         webSocket = null
         _connectionStatus.value = RealtimeConnectionStatus.DISCONNECTED
@@ -104,6 +119,13 @@ object SupabaseRealtimeManager {
         val context = appContext ?: return
         if (!SupabaseHelper.isSupabaseEnabled(context)) {
             _connectionStatus.value = RealtimeConnectionStatus.DISCONNECTED
+            return
+        }
+
+        if (!isNetworkAvailable(context)) {
+            Log.d(TAG, "Network currently unavailable. Postponing Supabase Realtime connection.")
+            _connectionStatus.value = RealtimeConnectionStatus.DISCONNECTED
+            scheduleReconnect(isNetworkOffline = true)
             return
         }
 
@@ -136,6 +158,7 @@ object SupabaseRealtimeManager {
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "Connected to Supabase Realtime WebSocket!")
+                retryAttempts = 0
                 _connectionStatus.value = RealtimeConnectionStatus.CONNECTED
                 startHeartbeat(webSocket)
                 joinRealtimeChannel(webSocket)
@@ -162,20 +185,31 @@ object SupabaseRealtimeManager {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "Supabase WebSocket failure: ${t.message}", t)
+                val isHostUnreachable = t is UnknownHostException || t.message?.contains("Unable to resolve host", ignoreCase = true) == true
+                if (isHostUnreachable) {
+                    Log.w(TAG, "Supabase Realtime server unreachable: hostname could not be resolved (project may be paused or offline): ${t.message}")
+                } else {
+                    Log.w(TAG, "Supabase Realtime connection notice: ${t.message ?: "Connection closed"}")
+                }
                 _connectionStatus.value = RealtimeConnectionStatus.ERROR
-                scheduleReconnect()
+                scheduleReconnect(isHostUnreachable = isHostUnreachable)
             }
         })
     }
 
-    private fun scheduleReconnect() {
+    private fun scheduleReconnect(isHostUnreachable: Boolean = false, isNetworkOffline: Boolean = false) {
         reconnectJob?.cancel()
         reconnectJob = scope.launch {
-            delay(5000)
+            retryAttempts++
+            val delayMs = when {
+                isNetworkOffline -> 20000L
+                isHostUnreachable -> (25000L * retryAttempts).coerceIn(30000L, 90000L)
+                else -> (5000L * retryAttempts).coerceIn(5000L, 60000L)
+            }
+            Log.d(TAG, "Scheduling realtime reconnect in ${delayMs / 1000}s (attempt #$retryAttempts)")
+            delay(delayMs)
             val context = appContext
             if (context != null && SupabaseHelper.isSupabaseEnabled(context)) {
-                Log.d(TAG, "Attempting to reconnect Supabase Realtime...")
                 connectIfEnabled()
             }
         }
@@ -461,7 +495,12 @@ object SupabaseRealtimeManager {
                 Result.failure(Exception("Supabase returned HTTP ${response.code}: ${response.message}"))
             }
         } catch (e: Exception) {
-            Result.failure(e)
+            val userMsg = if (e is UnknownHostException || e.message?.contains("Unable to resolve host", ignoreCase = true) == true) {
+                "Unable to resolve Supabase project host. If your free-tier Supabase project is paused due to inactivity, please unpause it from your Supabase Dashboard."
+            } else {
+                e.message ?: "Connection failed"
+            }
+            Result.failure(Exception(userMsg, e))
         }
     }
 }

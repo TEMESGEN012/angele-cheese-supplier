@@ -12,6 +12,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 data class SupabaseAppConfig(
@@ -120,6 +121,10 @@ object SupabaseHelper {
                     }
                 }
             } catch (e: Exception) {
+                if (e is UnknownHostException || e.message?.contains("Unable to resolve host", ignoreCase = true) == true) {
+                    Log.w(TAG, "$path host resolution notice: Supabase host unreachable (project may be paused or device offline). Continuing with local Room database.")
+                    return null
+                }
                 Log.w(TAG, "$path attempt $attempt/$maxAttempts network warning: ${e.message}")
                 if (attempt < maxAttempts) {
                     try { Thread.sleep(1500L) } catch (_: InterruptedException) {}
@@ -157,6 +162,10 @@ object SupabaseHelper {
                     }
                 }
             } catch (e: Exception) {
+                if (e is UnknownHostException || e.message?.contains("Unable to resolve host", ignoreCase = true) == true) {
+                    Log.w(TAG, "$path host resolution notice: Supabase host unreachable (project may be paused or device offline). Continuing with local Room database.")
+                    return false
+                }
                 Log.w(TAG, "$path boolean attempt $attempt/$maxAttempts error: ${e.message}")
                 if (attempt < maxAttempts) {
                     try { Thread.sleep(1500L) } catch (_: InterruptedException) {}
